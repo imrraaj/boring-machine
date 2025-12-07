@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -69,8 +69,8 @@ func main() {
 	log.Printf("✓ Forwarding requests to localhost:%d", *localPort)
 	log.Printf("✓ Public URL: https://%s.localhost:8443", clientID)
 
-	// Start keepalive goroutine
-	go sendKeepalive(ctx, conn)
+	// Create mutex for encoder (only one goroutine can encode at a time)
+	var encoderMu sync.Mutex
 
 	// Main loop: receive requests and proxy to local app
 	errChan := make(chan error, 1)
@@ -81,8 +81,10 @@ func main() {
 				errChan <- nil
 				return
 			default:
+				log.Printf("[DEBUG] Waiting to decode request...")
 				var req protocol.TunnelRequest
 				err := decoder.Decode(&req)
+				log.Printf("[DEBUG] Decode returned, err=%v", err)
 				if err != nil {
 					if ctx.Err() != nil {
 						// Context cancelled, normal shutdown
@@ -93,18 +95,28 @@ func main() {
 					return
 				}
 
-				log.Printf("→ %s %s", req.Method, req.URL)
+				log.Printf("→ %s %s (ID: %s)", req.Method, req.URL, req.RequestID)
 
-				// Proxy request to local application
-				resp := proxyToLocal(&req, *localPort)
+				// Handle request concurrently
+				go func(r protocol.TunnelRequest) {
+					// Proxy request to local application
+					resp := proxyToLocal(&r, *localPort)
 
-				err = encoder.Encode(resp)
-				if err != nil {
-					errChan <- fmt.Errorf("encode error: %w", err)
-					return
-				}
+					// Preserve RequestID in response
+					resp.RequestID = r.RequestID
 
-				log.Printf("← %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+					// Send response (must be serialized)
+					encoderMu.Lock()
+					err := encoder.Encode(resp)
+					encoderMu.Unlock()
+
+					if err != nil {
+						log.Printf("✗ Error sending response: %v", err)
+						return
+					}
+
+					log.Printf("← %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+				}(req)
 			}
 		}
 	}()
@@ -143,7 +155,7 @@ func proxyToLocal(tunnelReq *protocol.TunnelRequest, localPort int) *protocol.Tu
 
 	// Make request to local app
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 10 * time.Second,
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -175,25 +187,9 @@ func proxyToLocal(tunnelReq *protocol.TunnelRequest, localPort int) *protocol.Tu
 	}
 }
 
-func sendKeepalive(ctx context.Context, conn net.Conn) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			// Set write deadline to detect dead connections
-			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			// TCP keepalive is handled by the underlying connection
-			// This just ensures we're checking the connection periodically
-		}
-	}
-}
-
 func generateClientID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
-	return fmt.Sprintf("%x", b)
+	// return fmt.Sprintf("%x", b)
+	return fmt.Sprintf("deltaw")
 }

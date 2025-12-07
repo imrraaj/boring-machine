@@ -3,6 +3,7 @@ package main
 import (
 	"boring-machine/internal/protocol"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/gob"
 	"flag"
@@ -30,10 +31,13 @@ var (
 
 // ClientConn wraps a connection with its encoder/decoder and mutex
 type ClientConn struct {
-	conn    net.Conn
-	encoder *gob.Encoder
-	decoder *gob.Decoder
-	mu      sync.Mutex
+	conn            net.Conn
+	encoder         *gob.Encoder
+	decoder         *gob.Decoder
+	encoderMu       sync.Mutex
+	decoderMu       sync.Mutex
+	pendingRequests map[string]chan *protocol.TunnelResponse
+	pendingMu       sync.RWMutex
 }
 
 func main() {
@@ -87,30 +91,46 @@ func main() {
 			return
 		}
 
-		// Send request to client and receive response with timeout
-		// Note: We lock only during encode/decode operations
-		// Set deadline for tunnel operation on the TLS connection
-		client.conn.SetDeadline(time.Now().Add(*tunnelTimeout))
-		defer client.conn.SetDeadline(time.Time{}) // Clear deadline
+		// Generate unique request ID
+		requestID := generateRequestID()
+		tunnelReq.RequestID = requestID
 
-		client.mu.Lock()
+		// Create response channel for this request
+		respChan := make(chan *protocol.TunnelResponse, 1)
+		client.pendingMu.Lock()
+		client.pendingRequests[requestID] = respChan
+		client.pendingMu.Unlock()
+
+		// Clean up channel when done
+		defer func() {
+			client.pendingMu.Lock()
+			delete(client.pendingRequests, requestID)
+			client.pendingMu.Unlock()
+			close(respChan)
+		}()
+
+		// Send request to client
+		log.Printf("[TUNNEL] Sending request ID %s to client", requestID)
+		client.encoderMu.Lock()
 		err = client.encoder.Encode(tunnelReq)
-		client.mu.Unlock()
+		client.encoderMu.Unlock()
 		if err != nil {
 			log.Printf("[TUNNEL] ✗ Error sending to client: %v", err)
 			w.WriteHeader(http.StatusBadGateway)
 			fmt.Fprintf(w, "Error communicating with tunnel\n")
 			return
 		}
+		log.Printf("[TUNNEL] Request %s sent, waiting for response...", requestID)
 
-		var tunnelResp protocol.TunnelResponse
-		client.mu.Lock()
-		err = client.decoder.Decode(&tunnelResp)
-		client.mu.Unlock()
-		if err != nil {
-			log.Printf("[TUNNEL] ✗ Error receiving from client: %v", err)
-			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprintf(w, "Error receiving response from tunnel\n")
+		// Wait for response with timeout
+		var tunnelResp *protocol.TunnelResponse
+		select {
+		case tunnelResp = <-respChan:
+			// Got response
+		case <-time.After(*tunnelTimeout):
+			log.Printf("[TUNNEL] ✗ Timeout waiting for response")
+			w.WriteHeader(http.StatusGatewayTimeout)
+			fmt.Fprintf(w, "Timeout waiting for response from tunnel\n")
 			return
 		}
 
@@ -208,6 +228,12 @@ func main() {
 	log.Println("Server shutdown complete")
 }
 
+func generateRequestID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
+
 func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clientsMx *sync.RWMutex) {
 	defer conn.Close()
 
@@ -234,9 +260,10 @@ func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clien
 
 	// Store client connection
 	clientConn := &ClientConn{
-		conn:    conn,
-		encoder: encoder,
-		decoder: decoder,
+		conn:            conn,
+		encoder:         encoder,
+		decoder:         decoder,
+		pendingRequests: make(map[string]chan *protocol.TunnelResponse),
 	}
 
 	clientsMx.Lock()
@@ -255,7 +282,32 @@ func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clien
 		log.Printf("[CLIENT] ✗ Client disconnected: %s (active: %d)", reg.ClientID, activeClients)
 	}()
 
-	// Keep connection alive - the HTTP handler will use it
-	// Block here so the connection stays open
-	select {}
+	// Start goroutine to continuously read responses and route them
+	log.Printf("[CLIENT] Starting response reader loop for %s", reg.ClientID)
+	for {
+		log.Printf("[CLIENT] Waiting to decode response from %s...", reg.ClientID)
+		var tunnelResp protocol.TunnelResponse
+		clientConn.decoderMu.Lock()
+		err := clientConn.decoder.Decode(&tunnelResp)
+		clientConn.decoderMu.Unlock()
+
+		if err != nil {
+			log.Printf("[CLIENT] ✗ Error reading response from %s: %v", reg.ClientID, err)
+			return
+		}
+
+		log.Printf("[CLIENT] Received response ID %s from %s", tunnelResp.RequestID, reg.ClientID)
+
+		// Route response to the correct waiting request
+		clientConn.pendingMu.RLock()
+		respChan, ok := clientConn.pendingRequests[tunnelResp.RequestID]
+		clientConn.pendingMu.RUnlock()
+
+		if ok {
+			log.Printf("[CLIENT] Routing response %s to waiting handler", tunnelResp.RequestID)
+			respChan <- &tunnelResp
+		} else {
+			log.Printf("[CLIENT] ✗ No pending request found for ID %s", tunnelResp.RequestID)
+		}
+	}
 }
