@@ -17,17 +17,116 @@ import (
 	"syscall"
 	"time"
 
+	"boring-machine/internal/client"
 	"boring-machine/internal/protocol"
 )
 
-var (
-	serverAddr = flag.String("server", "localhost:8445", "Server address to connect to")
-	localPort  = flag.Int("port", 3000, "Local port to proxy requests to")
-	insecure   = flag.Bool("insecure", true, "Skip TLS certificate verification")
-)
-
 func main() {
-	flag.Parse()
+	if len(os.Args) < 2 {
+		printUsage()
+		os.Exit(1)
+	}
+
+	subcommand := os.Args[1]
+
+	switch subcommand {
+	case "auth":
+		handleAuthCommand(os.Args[2:])
+	case "tunnel":
+		handleTunnelCommand(os.Args[2:])
+	default:
+		fmt.Printf("Unknown command: %s\n", subcommand)
+		printUsage()
+		os.Exit(1)
+	}
+}
+
+func printUsage() {
+	fmt.Println("Usage: client <command> [options]")
+	fmt.Println()
+	fmt.Println("Commands:")
+	fmt.Println("  auth login     Login and store authentication token")
+	fmt.Println("  auth register  Register new account and store authentication token")
+	fmt.Println("  auth rotate    Rotate authentication token")
+	fmt.Println("  tunnel         Start tunnel to local server")
+}
+
+func handleAuthCommand(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: client auth <login|register|rotate>")
+		os.Exit(1)
+	}
+
+	authCmd := args[0]
+
+	switch authCmd {
+	case "login":
+		handleLogin(args[1:])
+	case "register":
+		handleRegister(args[1:])
+	case "rotate":
+		handleRotate(args[1:])
+	default:
+		fmt.Printf("Unknown auth command: %s\n", authCmd)
+		os.Exit(1)
+	}
+}
+
+func handleLogin(args []string) {
+	fmt.Print("Username: ")
+	var username string
+	fmt.Scanln(&username)
+
+	password, err := client.ReadPassword("Password: ")
+	if err != nil {
+		log.Fatalf("Failed to read password: %v", err)
+	}
+
+	if err := client.Login(username, password); err != nil {
+		log.Fatalf("Login failed: %v", err)
+	}
+}
+
+func handleRegister(args []string) {
+	fmt.Print("Username: ")
+	var username string
+	fmt.Scanln(&username)
+
+	fmt.Print("Email: ")
+	var email string
+	fmt.Scanln(&email)
+
+	password, err := client.ReadPassword("Password: ")
+	if err != nil {
+		log.Fatalf("Failed to read password: %v", err)
+	}
+
+	if err := client.Register(username, email, password); err != nil {
+		log.Fatalf("Registration failed: %v", err)
+	}
+}
+
+func handleRotate(args []string) {
+	if err := client.RotateToken(); err != nil {
+		log.Fatalf("Token rotation failed: %v", err)
+	}
+}
+
+func handleTunnelCommand(args []string) {
+	tunnelFlags := flag.NewFlagSet("tunnel", flag.ExitOnError)
+	serverAddr := tunnelFlags.String("server", "localhost:8445", "Server address to connect to")
+	localPort := tunnelFlags.Int("port", 3000, "Local port to proxy requests to")
+	insecure := tunnelFlags.Bool("insecure", true, "Skip TLS certificate verification")
+
+	tunnelFlags.Parse(args)
+
+	// Load credentials
+	creds, err := client.LoadCredentials()
+	if err != nil {
+		log.Fatalf("Failed to load credentials: %v", err)
+	}
+
+	log.Printf("Loaded credentials for user: %s", creds.Username)
 
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -56,14 +155,21 @@ func main() {
 	clientID := generateClientID()
 	log.Printf("Client ID: %s", clientID)
 
-	// Register with server
+	// Register with server including token
 	encoder := gob.NewEncoder(conn)
 	decoder := gob.NewDecoder(conn)
 
-	err = encoder.Encode(protocol.ClientRegister{ClientID: clientID})
+	err = encoder.Encode(protocol.ClientRegister{
+		ClientID: clientID,
+		Token:    creds.Token,
+	})
 	if err != nil {
 		log.Fatalf("Failed to register: %v", err)
 	}
+
+	// Check for error response from server (authentication failure)
+	// We need to try to decode a potential error response
+	// The server will either close the connection or start sending TunnelRequests
 
 	log.Printf("✓ Connected and registered with server")
 	log.Printf("✓ Forwarding requests to localhost:%d", *localPort)
@@ -154,10 +260,10 @@ func proxyToLocal(tunnelReq *protocol.TunnelRequest, localPort int) *protocol.Tu
 	}
 
 	// Make request to local app
-	client := &http.Client{
+	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
 	}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		log.Printf("Error proxying to local app: %v", err)
 		return &protocol.TunnelResponse{
@@ -190,6 +296,5 @@ func proxyToLocal(tunnelReq *protocol.TunnelRequest, localPort int) *protocol.Tu
 func generateClientID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
-	// return fmt.Sprintf("%x", b)
-	return fmt.Sprintf("deltaw")
+	return fmt.Sprintf("%x", b)
 }

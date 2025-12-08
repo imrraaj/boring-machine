@@ -1,6 +1,8 @@
 package main
 
 import (
+	"boring-machine/internal/auth"
+	"boring-machine/internal/database"
 	"boring-machine/internal/protocol"
 	"context"
 	"crypto/rand"
@@ -27,6 +29,7 @@ var (
 	readTimeout   = flag.Duration("read-timeout", 10*time.Second, "HTTP read timeout")
 	writeTimeout  = flag.Duration("write-timeout", 10*time.Second, "HTTP write timeout")
 	tunnelTimeout = flag.Duration("tunnel-timeout", 30*time.Second, "Timeout for tunnel requests")
+	dbConnString  = flag.String("db", os.Getenv("DATABASE_URL"), "PostgreSQL connection string")
 )
 
 // ClientConn wraps a connection with its encoder/decoder and mutex
@@ -42,6 +45,22 @@ type ClientConn struct {
 
 func main() {
 	flag.Parse()
+
+	// Initialize database
+	if *dbConnString == "" {
+		log.Fatal("Database connection string is required. Set DATABASE_URL environment variable or use -db flag")
+	}
+
+	db, err := database.New(context.Background(), *dbConnString)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+	log.Println("✓ Connected to database")
+
+	// Create auth handler and validator
+	authHandler := auth.NewHandler(db.Queries)
+	authValidator := auth.NewValidator(db.Queries)
 
 	clients := make(map[string]*ClientConn)
 	clientsMx := sync.RWMutex{}
@@ -64,6 +83,11 @@ func main() {
 	log.Printf("Client server will listen on %s", *clientPort)
 
 	mux := http.NewServeMux()
+
+	// Register auth endpoints
+	mux.HandleFunc("/auth/register", authHandler.HandleRegister)
+	mux.HandleFunc("/auth/login", authHandler.HandleLogin)
+	mux.HandleFunc("/auth/rotate", authHandler.HandleRotate)
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		clientsMx.RLock()
@@ -181,6 +205,26 @@ func main() {
 	log.Printf("✓ Client server listening on %s", *clientPort)
 	log.Println("Server ready! Waiting for client connections...")
 
+	// Start background token cleanup job
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				count, err := db.Queries.DeleteExpiredTokens(context.Background())
+				if err != nil {
+					log.Printf("[TOKEN] Error cleaning up expired tokens: %v", err)
+				} else if count > 0 {
+					log.Printf("[TOKEN] Cleaned up %d expired tokens", count)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	// Accept client connections in goroutine
 	go func() {
 		for {
@@ -196,7 +240,7 @@ func main() {
 				}
 			}
 
-			go handleClientConnection(conn, clients, &clientsMx)
+			go handleClientConnection(conn, clients, &clientsMx, authValidator)
 		}
 	}()
 
@@ -234,7 +278,7 @@ func generateRequestID() string {
 	return fmt.Sprintf("%x", b)
 }
 
-func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clientsMx *sync.RWMutex) {
+func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clientsMx *sync.RWMutex, validator *auth.Validator) {
 	defer conn.Close()
 
 	// Enable TCP keepalive
@@ -256,7 +300,17 @@ func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clien
 		return
 	}
 
-	log.Printf("[CLIENT] ✓ Client registered: %s from %s", reg.ClientID, conn.RemoteAddr())
+	// Validate token
+	userID, err := validator.ValidateToken(context.Background(), reg.Token)
+	if err != nil {
+		log.Printf("[CLIENT] ✗ Invalid token from %s: %v", conn.RemoteAddr(), err)
+		// Send error message to client
+		errorMsg := map[string]string{"error": fmt.Sprintf("Authentication failed: %v", err)}
+		encoder.Encode(errorMsg)
+		return
+	}
+
+	log.Printf("[CLIENT] ✓ Client registered: %s (user: %d) from %s", reg.ClientID, userID, conn.RemoteAddr())
 
 	// Store client connection
 	clientConn := &ClientConn{

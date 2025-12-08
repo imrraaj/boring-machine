@@ -8,6 +8,7 @@ import (
 // ClientRegister is sent by the client when it first connects to register itself
 type ClientRegister struct {
 	ClientID string
+	Token    string // Authentication token
 }
 
 // TunnelRequest represents an HTTP request to be sent through the tunnel
