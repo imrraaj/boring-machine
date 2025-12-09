@@ -19,6 +19,8 @@ import (
 
 	"boring-machine/internal/client"
 	"boring-machine/internal/protocol"
+
+	"github.com/gorilla/websocket"
 )
 
 func main() {
@@ -112,9 +114,57 @@ func handleRotate(args []string) {
 	}
 }
 
+// dialWebSocket connects to the server using WebSocket
+func dialWebSocket(serverAddr string) (*websocket.Conn, error) {
+	wsURL := fmt.Sprintf("ws://%s/tunnel/ws", serverAddr)
+
+	dialer := websocket.Dialer{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+	}
+
+	conn, _, err := dialer.Dial(wsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("websocket dial failed: %w", err)
+	}
+
+	return conn, nil
+}
+
+func connectAndRegister(ctx context.Context, serverAddr string, creds *client.Credentials, clientID string) (protocol.TunnelConn, *gob.Encoder, *gob.Decoder, error) {
+
+	log.Printf("Connecting to server at %s using websocket...", serverAddr)
+
+	var conn protocol.TunnelConn
+	var err error
+
+	wsConn, err := dialWebSocket(serverAddr)
+	if err != nil {
+		log.Fatalf("Websocket DialError: %s", err)
+	}
+	conn = protocol.NewWebSocketConn(wsConn)
+	encoder := gob.NewEncoder(conn)
+	decoder := gob.NewDecoder(conn)
+
+	err = encoder.Encode(protocol.ClientRegister{
+		ClientID: clientID,
+		Token:    creds.Token,
+	})
+	if err != nil {
+		log.Printf("Registration failed: %v", err)
+		conn.Close()
+	}
+
+	log.Printf("✓ Connected and registered with server")
+	return conn, encoder, decoder, nil
+}
+
 func handleTunnelCommand(args []string) {
 	tunnelFlags := flag.NewFlagSet("tunnel", flag.ExitOnError)
-	serverAddr := tunnelFlags.String("server", "localhost:8445", "Server address to connect to")
+	serverAddr := tunnelFlags.String("server", "localhost:8443", "Server address to connect to")
 	localPort := tunnelFlags.Int("port", 3000, "Local port to proxy requests to")
 	insecure := tunnelFlags.Bool("insecure", true, "Skip TLS certificate verification")
 
@@ -141,37 +191,17 @@ func handleTunnelCommand(args []string) {
 		cancel()
 	}()
 
-	// Connect to server with TLS
-	log.Printf("Connecting to server at %s...", *serverAddr)
-	conn, err := tls.Dial("tcp", *serverAddr, &tls.Config{
-		InsecureSkipVerify: *insecure,
-	})
+	// Generate random client ID
+	clientID := generateClientID()
+	log.Printf("Client ID: %s", clientID)
+
+	// Connect to server with retry
+	conn, encoder, decoder, err := connectAndRegister(ctx, *serverAddr, creds, clientID)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
 	defer conn.Close()
 
-	// Generate random client ID
-	clientID := generateClientID()
-	log.Printf("Client ID: %s", clientID)
-
-	// Register with server including token
-	encoder := gob.NewEncoder(conn)
-	decoder := gob.NewDecoder(conn)
-
-	err = encoder.Encode(protocol.ClientRegister{
-		ClientID: clientID,
-		Token:    creds.Token,
-	})
-	if err != nil {
-		log.Fatalf("Failed to register: %v", err)
-	}
-
-	// Check for error response from server (authentication failure)
-	// We need to try to decode a potential error response
-	// The server will either close the connection or start sending TunnelRequests
-
-	log.Printf("✓ Connected and registered with server")
 	log.Printf("✓ Forwarding requests to localhost:%d", *localPort)
 	log.Printf("✓ Public URL: https://%s.localhost:8443", clientID)
 

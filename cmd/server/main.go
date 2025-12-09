@@ -5,7 +5,6 @@ import (
 	"boring-machine/internal/database"
 	"boring-machine/internal/protocol"
 	"context"
-	"crypto/rand"
 	"crypto/tls"
 	"encoding/gob"
 	"flag"
@@ -19,36 +18,49 @@ import (
 	"sync"
 	"syscall"
 	"time"
-)
 
-var (
-	httpPort      = flag.String("http-port", ":8443", "HTTPS port for customer-facing server")
-	clientPort    = flag.String("client-port", ":8445", "Port for client connections")
-	certFile      = flag.String("cert", "certs/cert.pem", "TLS certificate file")
-	keyFile       = flag.String("key", "certs/key.pem", "TLS key file")
-	readTimeout   = flag.Duration("read-timeout", 10*time.Second, "HTTP read timeout")
-	writeTimeout  = flag.Duration("write-timeout", 10*time.Second, "HTTP write timeout")
-	tunnelTimeout = flag.Duration("tunnel-timeout", 30*time.Second, "Timeout for tunnel requests")
-	dbConnString  = flag.String("db", os.Getenv("DATABASE_URL"), "PostgreSQL connection string")
+	"github.com/gorilla/websocket"
 )
 
 // ClientConn wraps a connection with its encoder/decoder and mutex
 type ClientConn struct {
-	conn            net.Conn
+	conn            protocol.TunnelConn
 	encoder         *gob.Encoder
 	decoder         *gob.Decoder
 	encoderMu       sync.Mutex
 	decoderMu       sync.Mutex
 	pendingRequests map[string]chan *protocol.TunnelResponse
 	pendingMu       sync.RWMutex
+	cancelPing      context.CancelFunc
 }
 
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  4096,
+	WriteBufferSize: 4096,
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+var (
+	httpPort      = flag.String("http_port", ":8443", "HTTPS port for customer-facing server")
+	certFile      = flag.String("cert", "certs/cert.pem", "TLS certificate file")
+	keyFile       = flag.String("key", "certs/key.pem", "TLS key file")
+	readTimeout   = flag.Duration("read_timeout", 10*time.Second, "HTTP read timeout")
+	writeTimeout  = flag.Duration("write_timeout", 10*time.Second, "HTTP write timeout")
+	tunnelTimeout = flag.Duration("tunnel_timeout", 30*time.Second, "Timeout for tunnel requests")
+	dbConnString  = flag.String("db_url", "", "PostgreSQL connection string")
+)
+
 func main() {
+	LoadEnv()
 	flag.Parse()
 
-	// Initialize database
 	if *dbConnString == "" {
-		log.Fatal("Database connection string is required. Set DATABASE_URL environment variable or use -db flag")
+		*dbConnString = os.Getenv("DATABASE_URL")
+		if *dbConnString == "" {
+			log.Fatal("Database connection string is required. Set DATABASE_URL environment variable or use -db flag")
+		}
 	}
 
 	db, err := database.New(context.Background(), *dbConnString)
@@ -58,7 +70,6 @@ func main() {
 	defer db.Close()
 	log.Println("✓ Connected to database")
 
-	// Create auth handler and validator
 	authHandler := auth.NewHandler(db.Queries)
 	authValidator := auth.NewValidator(db.Queries)
 
@@ -78,16 +89,29 @@ func main() {
 		cancel()
 	}()
 
-	log.Printf("Starting boring-machine server...")
+	log.Printf("Starting boringMachine server...")
 	log.Printf("HTTPS server will listen on %s", *httpPort)
-	log.Printf("Client server will listen on %s", *clientPort)
 
 	mux := http.NewServeMux()
-
-	// Register auth endpoints
 	mux.HandleFunc("/auth/register", authHandler.HandleRegister)
 	mux.HandleFunc("/auth/login", authHandler.HandleLogin)
 	mux.HandleFunc("/auth/rotate", authHandler.HandleRotate)
+
+	mux.HandleFunc("/tunnel/ws", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[WS] New WebSocket connection attempt from %s", r.RemoteAddr)
+
+		// Upgrade to WebSocket
+		wsConn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Printf("[WS] Failed to upgrade connection: %v", err)
+			return
+		}
+
+		log.Printf("[WS] Connection upgraded successfully from %s", r.RemoteAddr)
+
+		tunnelConn := protocol.NewWebSocketConn(wsConn)
+		go handleClientConnection(tunnelConn, clients, &clientsMx, authValidator)
+	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		clientsMx.RLock()
@@ -170,13 +194,14 @@ func main() {
 		log.Printf("[TUNNEL] ← Response: %d %s (%d bytes)", tunnelResp.StatusCode, http.StatusText(tunnelResp.StatusCode), len(tunnelResp.Body))
 	})
 
-	certs, err := tls.LoadX509KeyPair(*certFile, *keyFile)
-	if err != nil {
-		log.Fatalf("Failed to load TLS certificates: %v", err)
-	}
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{certs},
-	}
+	// certs, err := tls.LoadX509KeyPair(*certFile, *keyFile)
+	// if err != nil {
+	// 	log.Fatalf("Failed to load TLS certificates: %v", err)
+	// }
+	// tlsConfig := &tls.Config{
+	// 	Certificates:       []tls.Certificate{certs},
+	// 	InsecureSkipVerify: true,
+	// }
 
 	customerFacingServer := &http.Server{
 		Addr:    *httpPort,
@@ -186,7 +211,6 @@ func main() {
 		WriteTimeout: *writeTimeout,
 	}
 
-	// Start HTTPS server in goroutine
 	go func() {
 		log.Printf("✓ HTTPS server listening on %s", *httpPort)
 		err := customerFacingServer.ListenAndServe()
@@ -195,62 +219,8 @@ func main() {
 		}
 	}()
 
-	// Start client-facing TCP server
-	ln, err := tls.Listen("tcp", *clientPort, tlsConfig)
-	if err != nil {
-		log.Fatalf("Could not start client server: %s", err)
-	}
-	defer ln.Close()
-
-	log.Printf("✓ Client server listening on %s", *clientPort)
-	log.Println("Server ready! Waiting for client connections...")
-
-	// Start background token cleanup job
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				count, err := db.Queries.DeleteExpiredTokens(context.Background())
-				if err != nil {
-					log.Printf("[TOKEN] Error cleaning up expired tokens: %v", err)
-				} else if count > 0 {
-					log.Printf("[TOKEN] Cleaned up %d expired tokens", count)
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	// Accept client connections in goroutine
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				select {
-				case <-ctx.Done():
-					// Server is shutting down
-					return
-				default:
-					log.Printf("[CLIENT] Error accepting connection: %v", err)
-					continue
-				}
-			}
-
-			go handleClientConnection(conn, clients, &clientsMx, authValidator)
-		}
-	}()
-
-	// Wait for shutdown signal
 	<-ctx.Done()
-
-	// Graceful shutdown
 	log.Println("Shutting down servers...")
-
-	// Shutdown HTTPS server with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
@@ -258,10 +228,6 @@ func main() {
 		log.Printf("HTTPS server shutdown error: %v", err)
 	}
 
-	// Close client listener
-	ln.Close()
-
-	// Close all client connections
 	clientsMx.Lock()
 	for id, client := range clients {
 		log.Printf("[CLIENT] Closing connection to %s", id)
@@ -272,20 +238,21 @@ func main() {
 	log.Println("Server shutdown complete")
 }
 
-func generateRequestID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return fmt.Sprintf("%x", b)
-}
-
-func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clientsMx *sync.RWMutex, validator *auth.Validator) {
+func handleClientConnection(conn protocol.TunnelConn, clients map[string]*ClientConn, clientsMx *sync.RWMutex, validator *auth.Validator) {
 	defer conn.Close()
 
-	// Enable TCP keepalive
-	if tcpConn, ok := conn.(*tls.Conn); ok {
-		if tc, ok := tcpConn.NetConn().(*net.TCPConn); ok {
-			tc.SetKeepAlive(true)
-			tc.SetKeepAlivePeriod(30 * time.Second)
+	connType := conn.ConnectionType()
+	log.Printf("[%s] New connection from %s", strings.ToUpper(connType), conn.RemoteAddr())
+
+	// Enable TCP keepalive for TCP connections
+	if connType == "tcp" {
+		if tcpConn, ok := conn.(*protocol.TCPConn); ok {
+			if tlsConn, ok := tcpConn.Conn.(*tls.Conn); ok {
+				if tc, ok := tlsConn.NetConn().(*net.TCPConn); ok {
+					tc.SetKeepAlive(true)
+					tc.SetKeepAlivePeriod(30 * time.Second)
+				}
+			}
 		}
 	}
 
@@ -310,7 +277,10 @@ func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clien
 		return
 	}
 
-	log.Printf("[CLIENT] ✓ Client registered: %s (user: %d) from %s", reg.ClientID, userID, conn.RemoteAddr())
+	log.Printf("[%s] ✓ Client registered: %s (user: %d) from %s", strings.ToUpper(connType), reg.ClientID, userID, conn.RemoteAddr())
+
+	// Create context for ping cancellation
+	pingCtx, pingCancel := context.WithCancel(context.Background())
 
 	// Store client connection
 	clientConn := &ClientConn{
@@ -318,6 +288,7 @@ func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clien
 		encoder:         encoder,
 		decoder:         decoder,
 		pendingRequests: make(map[string]chan *protocol.TunnelResponse),
+		cancelPing:      pingCancel,
 	}
 
 	clientsMx.Lock()
@@ -325,15 +296,23 @@ func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clien
 	activeClients := len(clients)
 	clientsMx.Unlock()
 
-	log.Printf("[CLIENT] Active clients: %d", activeClients)
+	log.Printf("[%s] Active clients: %d", strings.ToUpper(connType), activeClients)
+
+	// Start ping goroutine for WebSocket connections
+	if connType == "websocket" {
+		if wsConn, ok := conn.(*protocol.WebSocketConn); ok {
+			go handleWebSocketPing(pingCtx, wsConn, reg.ClientID)
+		}
+	}
 
 	// Clean up on disconnect
 	defer func() {
+		pingCancel() // Stop ping goroutine
 		clientsMx.Lock()
 		delete(clients, reg.ClientID)
 		activeClients := len(clients)
 		clientsMx.Unlock()
-		log.Printf("[CLIENT] ✗ Client disconnected: %s (active: %d)", reg.ClientID, activeClients)
+		log.Printf("[%s] ✗ Client disconnected: %s (active: %d)", strings.ToUpper(connType), reg.ClientID, activeClients)
 	}()
 
 	// Start goroutine to continuously read responses and route them
@@ -362,6 +341,40 @@ func handleClientConnection(conn net.Conn, clients map[string]*ClientConn, clien
 			respChan <- &tunnelResp
 		} else {
 			log.Printf("[CLIENT] ✗ No pending request found for ID %s", tunnelResp.RequestID)
+		}
+	}
+}
+
+// handleWebSocketPing sends periodic ping frames to keep WebSocket connection alive
+func handleWebSocketPing(ctx context.Context, conn *protocol.WebSocketConn, clientID string) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	wsConn := conn.GetWebSocketConn()
+
+	// Set pong handler to reset read deadline
+	wsConn.SetPongHandler(func(appData string) error {
+		log.Printf("[WS-PING] Received pong from %s", clientID)
+		// Reset read deadline on pong
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
+	// Set initial read deadline
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("[WS-PING] Stopping ping for %s", clientID)
+			return
+		case <-ticker.C:
+			log.Printf("[WS-PING] Sending ping to %s", clientID)
+			err := wsConn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second))
+			if err != nil {
+				log.Printf("[WS-PING] Failed to send ping to %s: %v", clientID, err)
+				return
+			}
 		}
 	}
 }
