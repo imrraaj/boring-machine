@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boring-Machine Benchmark Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        h2 {
+            color: #555;
+            margin: 30px 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #eee;
+        }
+
+        h3 {
+            color: #666;
+            margin: 20px 0 10px 0;
+        }
+
+        .metadata {
+            color: #777;
+            margin-bottom: 30px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+
+        .metadata p {
+            margin: 5px 0;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .metric {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .metric h3 {
+            font-size: 0.9em;
+            font-weight: normal;
+            opacity: 0.9;
+            margin-bottom: 10px;
+            color: white;
+        }
+
+        .metric .value {
+            font-size: 2em;
+            font-weight: bold;
+        }
+
+        .metric .unit {
+            font-size: 0.8em;
+            opacity: 0.8;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 30px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+            color: #333;
+        }
+
+        tr:hover {
+            background: #f9f9f9;
+        }
+
+        .test-section {
+            margin: 40px 0;
+            padding: 30px;
+            background: #fafafa;
+            border-radius: 8px;
+        }
+
+        .success {
+            color: #28a745;
+        }
+
+        .error {
+            color: #dc3545;
+        }
+
+        .warning {
+            color: #ffc107;
+        }
+
+        .breaking-point {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Boring-Machine Benchmark Report</h1>
+        <div class="metadata">
+            <p><strong>Generated:</strong> 2025-12-10 11:40:55</p>
+            <p><strong>Total Duration:</strong> 2.87 minutes</p>
+        </div>
+
+        
+        <div class="test-section">
+            <h2>⚡ Spike Test Results</h2>
+            <p>Tests the system's ability to handle sudden traffic spikes.</p>
+
+            <div class="metrics-grid">
+                <div class="metric">
+                    <h3>Total Requests</h3>
+                    <p class="value">12165</p>
+                </div>
+                <div class="metric">
+                    <h3>Avg RPS</h3>
+                    <p class="value">155</p>
+                </div>
+                <div class="metric">
+                    <h3>Peak RPS</h3>
+                    <p class="value">975</p>
+                </div>
+                <div class="metric">
+                    <h3>P95 Latency</h3>
+                    <p class="value">39.0<span class="unit">ms</span></p>
+                </div>
+                <div class="metric">
+                    <h3>P99 Latency</h3>
+                    <p class="value">387.0<span class="unit">ms</span></p>
+                </div>
+                <div class="metric">
+                    <h3>Error Rate</h3>
+                    <p class="value">43.83<span class="unit">%</span></p>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <canvas id="spikeRpsChart"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <canvas id="spikeLatencyChart"></canvas>
+            </div>
+        </div>
+
+        
+        <div class="test-section">
+            <h2>💪 Stress Test Results</h2>
+            <p>Progressively increases load to find the system's breaking point.</p>
+
+            
+            <div class="breaking-point">
+                <strong>⚠️  Breaking Point:</strong> 10 req/sec<br>
+                <strong>Reason:</strong> Error rate exceeded 5.0% threshold (50.53%)
+            </div>
+            
+
+            <div class="metrics-grid">
+                <div class="metric">
+                    <h3>Total Requests</h3>
+                    <p class="value">95</p>
+                </div>
+                <div class="metric">
+                    <h3>Avg RPS</h3>
+                    <p class="value">1</p>
+                </div>
+                <div class="metric">
+                    <h3>Peak RPS</h3>
+                    <p class="value">10</p>
+                </div>
+                <div class="metric">
+                    <h3>P95 Latency</h3>
+                    <p class="value">13.0<span class="unit">ms</span></p>
+                </div>
+                <div class="metric">
+                    <h3>P99 Latency</h3>
+                    <p class="value">14.0<span class="unit">ms</span></p>
+                </div>
+                <div class="metric">
+                    <h3>Error Rate</h3>
+                    <p class="value">50.53<span class="unit">%</span></p>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <canvas id="stressRpsChart"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <canvas id="stressLatencyChart"></canvas>
+            </div>
+        </div>
+
+        
+        <h2>📊 Detailed Metrics</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Metric</th>
+                    <th>Spike Test</th>
+                    <th>Stress Test</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Total Requests</td>
+                    <td>12165</td>
+                    <td>95</td>
+                </tr>
+                <tr>
+                    <td>Successful Requests</td>
+                    <td>6833</td>
+                    <td>47</td>
+                </tr>
+                <tr>
+                    <td>Failed Requests</td>
+                    <td>5332</td>
+                    <td>48</td>
+                </tr>
+                <tr>
+                    <td>Min Latency (ms)</td>
+                    <td>2.00</td>
+                    <td>4.00</td>
+                </tr>
+                <tr>
+                    <td>Mean Latency (ms)</td>
+                    <td>29.76</td>
+                    <td>9.43</td>
+                </tr>
+                <tr>
+                    <td>P50 Latency (ms)</td>
+                    <td>19.00</td>
+                    <td>9.00</td>
+                </tr>
+                <tr>
+                    <td>P95 Latency (ms)</td>
+                    <td>39.00</td>
+                    <td>13.00</td>
+                </tr>
+                <tr>
+                    <td>P99 Latency (ms)</td>
+                    <td>387.00</td>
+                    <td>14.00</td>
+                </tr>
+                <tr>
+                    <td>Max Latency (ms)</td>
+                    <td>511.00</td>
+                    <td>14.00</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        
+        const spikeMetrics = JSON.parse('{\u0022test_name\u0022:\u0022Spike Test\u0022,\u0022total_requests\u0022:12165,\u0022successful_requests\u0022:6833,\u0022failed_requests\u0022:5332,\u0022total_duration\u0022:78508778316,\u0022start_time\u0022:\u00222025-12-10T11:39:27.220123159\u002b05:30\u0022,\u0022end_time\u0022:\u00222025-12-10T11:40:45.728901475\u002b05:30\u0022,\u0022requests_per_second\u0022:154.95082538458996,\u0022peak_rps\u0022:975,\u0022latency_p50\u0022:19,\u0022latency_p95\u0022:39,\u0022latency_p99\u0022:387,\u0022latency_min\u0022:2,\u0022latency_max\u0022:511,\u0022latency_mean\u0022:29.76335430996634,\u0022error_rate\u0022:43.83066173448418,\u0022errors_by_type\u0022:{\u0022HTTP 404\u0022:5332},\u0022time_series_rps\u0022:[{\u0022timestamp\u0022:\u00222025-12-10T11:39:28\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:29\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:30\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:31\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:32\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:33\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:34\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:35\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:36\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:37\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:38\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:39\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:40\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:41\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:42\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:43\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:44\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:45\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:46\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:47\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:48\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:49\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:50\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:51\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:52\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:53\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:54\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:55\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:56\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:39:57\u002b05:30\u0022,\u0022value\u0022:6},{\u0022timestamp\u0022:\u00222025-12-10T11:39:58\u002b05:30\u0022,\u0022value\u0022:0},{\u0022timestamp\u0022:\u00222025-12-10T11:39:59\u002b05:30\u0022,\u0022value\u0022:183},{\u0022timestamp\u0022:\u00222025-12-10T11:40:00\u002b05:30\u0022,\u0022value\u0022:183},{\u0022timestamp\u0022:\u00222025-12-10T11:40:01\u002b05:30\u0022,\u0022value\u0022:200},{\u0022timestamp\u0022:\u00222025-12-10T11:40:02\u002b05:30\u0022,\u0022value\u0022:298},{\u0022timestamp\u0022:\u00222025-12-10T11:40:03\u002b05:30\u0022,\u0022value\u0022:496},{\u0022timestamp\u0022:\u00222025-12-10T11:40:04\u002b05:30\u0022,\u0022value\u0022:533},{\u0022timestamp\u0022:\u00222025-12-10T11:40:05\u002b05:30\u0022,\u0022value\u0022:589},{\u0022timestamp\u0022:\u00222025-12-10T11:40:06\u002b05:30\u0022,\u0022value\u0022:965},{\u0022timestamp\u0022:\u00222025-12-10T11:40:07\u002b05:30\u0022,\u0022value\u0022:972},{\u0022timestamp\u0022:\u00222025-12-10T11:40:08\u002b05:30\u0022,\u0022value\u0022:973},{\u0022timestamp\u0022:\u00222025-12-10T11:40:09\u002b05:30\u0022,\u0022value\u0022:964},{\u0022timestamp\u0022:\u00222025-12-10T11:40:10\u002b05:30\u0022,\u0022value\u0022:971},{\u0022timestamp\u0022:\u00222025-12-10T11:40:11\u002b05:30\u0022,\u0022value\u0022:956},{\u0022timestamp\u0022:\u00222025-12-10T11:40:12\u002b05:30\u0022,\u0022value\u0022:975},{\u0022timestamp\u0022:\u00222025-12-10T11:40:13\u002b05:30\u0022,\u0022value\u0022:975},{\u0022timestamp\u0022:\u00222025-12-10T11:40:14\u002b05:30\u0022,\u0022value\u0022:972},{\u0022timestamp\u0022:\u00222025-12-10T11:40:15\u002b05:30\u0022,\u0022value\u0022:368},{\u0022timestamp\u0022:\u00222025-12-10T11:40:16\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:17\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:18\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:19\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:20\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:21\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:22\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:23\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:24\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:25\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:26\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:27\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:28\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:29\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:30\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:31\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:32\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:33\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:34\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:35\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:36\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:37\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:38\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:39\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:40\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:41\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:42\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:43\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:44\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:45\u002b05:30\u0022,\u0022value\u0022:6}],\u0022time_series_latency\u0022:[{\u0022timestamp\u0022:\u00222025-12-10T11:39:28\u002b05:30\u0022,\u0022value\u0022:4},{\u0022timestamp\u0022:\u00222025-12-10T11:39:29\u002b05:30\u0022,\u0022value\u0022:13},{\u0022timestamp\u0022:\u00222025-12-10T11:39:30\u002b05:30\u0022,\u0022value\u0022:7},{\u0022timestamp\u0022:\u00222025-12-10T11:39:31\u002b05:30\u0022,\u0022value\u0022:15},{\u0022timestamp\u0022:\u00222025-12-10T11:39:32\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:33\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:34\u002b05:30\u0022,\u0022value\u0022:124},{\u0022timestamp\u0022:\u00222025-12-10T11:39:35\u002b05:30\u0022,\u0022value\u0022:6},{\u0022timestamp\u0022:\u00222025-12-10T11:39:36\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:37\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:38\u002b05:30\u0022,\u0022value\u0022:293},{\u0022timestamp\u0022:\u00222025-12-10T11:39:39\u002b05:30\u0022,\u0022value\u0022:12},{\u0022timestamp\u0022:\u00222025-12-10T11:39:40\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:41\u002b05:30\u0022,\u0022value\u0022:7},{\u0022timestamp\u0022:\u00222025-12-10T11:39:42\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:43\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:44\u002b05:30\u0022,\u0022value\u0022:4},{\u0022timestamp\u0022:\u00222025-12-10T11:39:45\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:46\u002b05:30\u0022,\u0022value\u0022:445},{\u0022timestamp\u0022:\u00222025-12-10T11:39:47\u002b05:30\u0022,\u0022value\u0022:12},{\u0022timestamp\u0022:\u00222025-12-10T11:39:48\u002b05:30\u0022,\u0022value\u0022:6},{\u0022timestamp\u0022:\u00222025-12-10T11:39:49\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:50\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:51\u002b05:30\u0022,\u0022value\u0022:4},{\u0022timestamp\u0022:\u00222025-12-10T11:39:52\u002b05:30\u0022,\u0022value\u0022:6},{\u0022timestamp\u0022:\u00222025-12-10T11:39:53\u002b05:30\u0022,\u0022value\u0022:148},{\u0022timestamp\u0022:\u00222025-12-10T11:39:54\u002b05:30\u0022,\u0022value\u0022:5},{\u0022timestamp\u0022:\u00222025-12-10T11:39:55\u002b05:30\u0022,\u0022value\u0022:12},{\u0022timestamp\u0022:\u00222025-12-10T11:39:56\u002b05:30\u0022,\u0022value\u0022:6},{\u0022timestamp\u0022:\u00222025-12-10T11:39:57\u002b05:30\u0022,\u0022value\u0022:314},{\u0022timestamp\u0022:\u00222025-12-10T11:39:59\u002b05:30\u0022,\u0022value\u0022:39},{\u0022timestamp\u0022:\u00222025-12-10T11:40:00\u002b05:30\u0022,\u0022value\u0022:25},{\u0022timestamp\u0022:\u00222025-12-10T11:40:01\u002b05:30\u0022,\u0022value\u0022:33},{\u0022timestamp\u0022:\u00222025-12-10T11:40:02\u002b05:30\u0022,\u0022value\u0022:129},{\u0022timestamp\u0022:\u00222025-12-10T11:40:03\u002b05:30\u0022,\u0022value\u0022:34},{\u0022timestamp\u0022:\u00222025-12-10T11:40:04\u002b05:30\u0022,\u0022value\u0022:39},{\u0022timestamp\u0022:\u00222025-12-10T11:40:05\u002b05:30\u0022,\u0022value\u0022:41},{\u0022timestamp\u0022:\u00222025-12-10T11:40:06\u002b05:30\u0022,\u0022value\u0022:40},{\u0022timestamp\u0022:\u00222025-12-10T11:40:07\u002b05:30\u0022,\u0022value\u0022:46},{\u0022timestamp\u0022:\u00222025-12-10T11:40:08\u002b05:30\u0022,\u0022value\u0022:23},{\u0022timestamp\u0022:\u00222025-12-10T11:40:09\u002b05:30\u0022,\u0022value\u0022:22},{\u0022timestamp\u0022:\u00222025-12-10T11:40:10\u002b05:30\u0022,\u0022value\u0022:25},{\u0022timestamp\u0022:\u00222025-12-10T11:40:11\u002b05:30\u0022,\u0022value\u0022:27},{\u0022timestamp\u0022:\u00222025-12-10T11:40:12\u002b05:30\u0022,\u0022value\u0022:26},{\u0022timestamp\u0022:\u00222025-12-10T11:40:13\u002b05:30\u0022,\u0022value\u0022:27},{\u0022timestamp\u0022:\u00222025-12-10T11:40:14\u002b05:30\u0022,\u0022value\u0022:30},{\u0022timestamp\u0022:\u00222025-12-10T11:40:15\u002b05:30\u0022,\u0022value\u0022:29},{\u0022timestamp\u0022:\u00222025-12-10T11:40:16\u002b05:30\u0022,\u0022value\u0022:263},{\u0022timestamp\u0022:\u00222025-12-10T11:40:17\u002b05:30\u0022,\u0022value\u0022:12},{\u0022timestamp\u0022:\u00222025-12-10T11:40:18\u002b05:30\u0022,\u0022value\u0022:12},{\u0022timestamp\u0022:\u00222025-12-10T11:40:19\u002b05:30\u0022,\u0022value\u0022:15},{\u0022timestamp\u0022:\u00222025-12-10T11:40:20\u002b05:30\u0022,\u0022value\u0022:12},{\u0022timestamp\u0022:\u00222025-12-10T11:40:21\u002b05:30\u0022,\u0022value\u0022:13},{\u0022timestamp\u0022:\u00222025-12-10T11:40:22\u002b05:30\u0022,\u0022value\u0022:144},{\u0022timestamp\u0022:\u00222025-12-10T11:40:23\u002b05:30\u0022,\u0022value\u0022:14},{\u0022timestamp\u0022:\u00222025-12-10T11:40:24\u002b05:30\u0022,\u0022value\u0022:12},{\u0022timestamp\u0022:\u00222025-12-10T11:40:25\u002b05:30\u0022,\u0022value\u0022:380},{\u0022timestamp\u0022:\u00222025-12-10T11:40:26\u002b05:30\u0022,\u0022value\u0022:15},{\u0022timestamp\u0022:\u00222025-12-10T11:40:27\u002b05:30\u0022,\u0022value\u0022:13},{\u0022timestamp\u0022:\u00222025-12-10T11:40:28\u002b05:30\u0022,\u0022value\u0022:15},{\u0022timestamp\u0022:\u00222025-12-10T11:40:29\u002b05:30\u0022,\u0022value\u0022:11},{\u0022timestamp\u0022:\u00222025-12-10T11:40:30\u002b05:30\u0022,\u0022value\u0022:13},{\u0022timestamp\u0022:\u00222025-12-10T11:40:31\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:32\u002b05:30\u0022,\u0022value\u0022:14},{\u0022timestamp\u0022:\u00222025-12-10T11:40:33\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:34\u002b05:30\u0022,\u0022value\u0022:334},{\u0022timestamp\u0022:\u00222025-12-10T11:40:35\u002b05:30\u0022,\u0022value\u0022:9},{\u0022timestamp\u0022:\u00222025-12-10T11:40:36\u002b05:30\u0022,\u0022value\u0022:9},{\u0022timestamp\u0022:\u00222025-12-10T11:40:37\u002b05:30\u0022,\u0022value\u0022:14},{\u0022timestamp\u0022:\u00222025-12-10T11:40:38\u002b05:30\u0022,\u0022value\u0022:14},{\u0022timestamp\u0022:\u00222025-12-10T11:40:39\u002b05:30\u0022,\u0022value\u0022:14},{\u0022timestamp\u0022:\u00222025-12-10T11:40:40\u002b05:30\u0022,\u0022value\u0022:11},{\u0022timestamp\u0022:\u00222025-12-10T11:40:41\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:42\u002b05:30\u0022,\u0022value\u0022:14},{\u0022timestamp\u0022:\u00222025-12-10T11:40:43\u002b05:30\u0022,\u0022value\u0022:138},{\u0022timestamp\u0022:\u00222025-12-10T11:40:44\u002b05:30\u0022,\u0022value\u0022:12},{\u0022timestamp\u0022:\u00222025-12-10T11:40:45\u002b05:30\u0022,\u0022value\u0022:11}]}');
+        const stressMetrics = JSON.parse('{\u0022test_name\u0022:\u0022Stress Test\u0022,\u0022total_requests\u0022:95,\u0022successful_requests\u0022:47,\u0022failed_requests\u0022:48,\u0022total_duration\u0022:93534591329,\u0022start_time\u0022:\u00222025-12-10T11:39:22.213672965\u002b05:30\u0022,\u0022end_time\u0022:\u00222025-12-10T11:40:55.748264259\u002b05:30\u0022,\u0022requests_per_second\u0022:1.0156670238269985,\u0022peak_rps\u0022:10,\u0022latency_p50\u0022:9,\u0022latency_p95\u0022:13,\u0022latency_p99\u0022:14,\u0022latency_min\u0022:4,\u0022latency_max\u0022:14,\u0022latency_mean\u0022:9.425531914893616,\u0022error_rate\u0022:50.526315789473685,\u0022errors_by_type\u0022:{\u0022HTTP 404\u0022:48},\u0022time_series_rps\u0022:[{\u0022timestamp\u0022:\u00222025-12-10T11:40:46\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:47\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:48\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:49\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:50\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:51\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:52\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:53\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:54\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:55\u002b05:30\u0022,\u0022value\u0022:5}],\u0022time_series_latency\u0022:[{\u0022timestamp\u0022:\u00222025-12-10T11:40:46\u002b05:30\u0022,\u0022value\u0022:14},{\u0022timestamp\u0022:\u00222025-12-10T11:40:47\u002b05:30\u0022,\u0022value\u0022:13},{\u0022timestamp\u0022:\u00222025-12-10T11:40:48\u002b05:30\u0022,\u0022value\u0022:13},{\u0022timestamp\u0022:\u00222025-12-10T11:40:49\u002b05:30\u0022,\u0022value\u0022:13},{\u0022timestamp\u0022:\u00222025-12-10T11:40:50\u002b05:30\u0022,\u0022value\u0022:13},{\u0022timestamp\u0022:\u00222025-12-10T11:40:51\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:52\u002b05:30\u0022,\u0022value\u0022:9},{\u0022timestamp\u0022:\u00222025-12-10T11:40:53\u002b05:30\u0022,\u0022value\u0022:11},{\u0022timestamp\u0022:\u00222025-12-10T11:40:54\u002b05:30\u0022,\u0022value\u0022:10},{\u0022timestamp\u0022:\u00222025-12-10T11:40:55\u002b05:30\u0022,\u0022value\u0022:12}],\u0022breaking_point_rps\u0022:10,\u0022breaking_point_reason\u0022:\u0022Error rate exceeded 5.0% threshold (50.53%)\u0022}');
+
+        
+        Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif';
+        Chart.defaults.color = '#666';
+
+        
+        new Chart(document.getElementById('spikeRpsChart'), {
+            type: 'line',
+            data: {
+                labels: spikeMetrics.time_series_rps.map(p => new Date(p.timestamp).toLocaleTimeString()),
+                datasets: [{
+                    label: 'Requests per Second',
+                    data: spikeMetrics.time_series_rps.map(p => p.value),
+                    borderColor: '#667eea',
+                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Spike Test - Requests Per Second Over Time' },
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'RPS' } }
+                }
+            }
+        });
+
+        
+        new Chart(document.getElementById('spikeLatencyChart'), {
+            type: 'line',
+            data: {
+                labels: spikeMetrics.time_series_latency.map(p => new Date(p.timestamp).toLocaleTimeString()),
+                datasets: [{
+                    label: 'P95 Latency (ms)',
+                    data: spikeMetrics.time_series_latency.map(p => p.value),
+                    borderColor: '#f093fb',
+                    backgroundColor: 'rgba(240, 147, 251, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Spike Test - P95 Latency Over Time' },
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Latency (ms)' } }
+                }
+            }
+        });
+
+        
+        new Chart(document.getElementById('stressRpsChart'), {
+            type: 'line',
+            data: {
+                labels: stressMetrics.time_series_rps.map(p => new Date(p.timestamp).toLocaleTimeString()),
+                datasets: [{
+                    label: 'Requests per Second',
+                    data: stressMetrics.time_series_rps.map(p => p.value),
+                    borderColor: '#4facfe',
+                    backgroundColor: 'rgba(79, 172, 254, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Stress Test - Requests Per Second Over Time' },
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'RPS' } }
+                }
+            }
+        });
+
+        
+        new Chart(document.getElementById('stressLatencyChart'), {
+            type: 'line',
+            data: {
+                labels: stressMetrics.time_series_latency.map(p => new Date(p.timestamp).toLocaleTimeString()),
+                datasets: [{
+                    label: 'P95 Latency (ms)',
+                    data: stressMetrics.time_series_latency.map(p => p.value),
+                    borderColor: '#43e97b',
+                    backgroundColor: 'rgba(67, 233, 123, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: 'Stress Test - P95 Latency Over Time' },
+                    legend: { display: false }
+                },
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Latency (ms)' } }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
