@@ -16,26 +16,32 @@ import (
 	"syscall"
 	"time"
 
-	"boring-machine/internal/client"
 	"boring-machine/internal/protocol"
 	"boring-machine/internal/wsio"
 
 	"github.com/gorilla/websocket"
 )
 
+var verbose bool
+
 func main() {
-	if len(os.Args) < 2 {
+	// Parse global flags first
+	flag.BoolVar(&verbose, "verbose", false, "Enable verbose/debug logging")
+	flag.Parse()
+
+	args := flag.Args()
+	if len(args) < 1 {
 		printUsage()
 		os.Exit(1)
 	}
 
-	subcommand := os.Args[1]
+	subcommand := args[0]
 
 	switch subcommand {
 	case "auth":
-		handleAuthCommand(os.Args[2:])
+		handleAuthCommand(args[1:])
 	case "tunnel":
-		handleTunnelCommand(os.Args[2:])
+		handleTunnelCommand(args[1:])
 	default:
 		fmt.Printf("Unknown command: %s\n", subcommand)
 		printUsage()
@@ -44,7 +50,10 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println("Usage: client <command> [options]")
+	fmt.Println("Usage: client [--verbose] <command> [options]")
+	fmt.Println()
+	fmt.Println("Global Flags:")
+	fmt.Println("  --verbose      Enable verbose/debug logging")
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  auth login     Login and store authentication token")
@@ -79,12 +88,12 @@ func handleLogin(args []string) {
 	var username string
 	fmt.Scanln(&username)
 
-	password, err := client.ReadPassword("Password: ")
+	password, err := ReadPassword("Password: ")
 	if err != nil {
 		log.Fatalf("Failed to read password: %v", err)
 	}
 
-	if err := client.Login(username, password); err != nil {
+	if err := Login(username, password); err != nil {
 		log.Fatalf("Login failed: %v", err)
 	}
 }
@@ -98,18 +107,18 @@ func handleRegister(args []string) {
 	var email string
 	fmt.Scanln(&email)
 
-	password, err := client.ReadPassword("Password: ")
+	password, err := ReadPassword("Password: ")
 	if err != nil {
 		log.Fatalf("Failed to read password: %v", err)
 	}
 
-	if err := client.Register(username, email, password); err != nil {
+	if err := Register(username, email, password); err != nil {
 		log.Fatalf("Registration failed: %v", err)
 	}
 }
 
 func handleRotate(args []string) {
-	if err := client.RotateToken(); err != nil {
+	if err := RotateToken(); err != nil {
 		log.Fatalf("Token rotation failed: %v", err)
 	}
 }
@@ -134,7 +143,7 @@ func dialWebSocket(serverAddr string) (*websocket.Conn, error) {
 	return conn, nil
 }
 
-func connectAndRegister(ctx context.Context, serverAddr string, creds *client.Credentials) (*websocket.Conn, *gob.Encoder, *gob.Decoder, string, error) {
+func connectAndRegister(ctx context.Context, serverAddr string, creds *Credentials) (*websocket.Conn, *gob.Encoder, *gob.Decoder, string, error) {
 
 	log.Printf("Connecting to server at %s using websocket...", serverAddr)
 
@@ -175,16 +184,27 @@ func handleTunnelCommand(args []string) {
 	tunnelFlags := flag.NewFlagSet("tunnel", flag.ExitOnError)
 	serverAddr := tunnelFlags.String("server", "localhost:8443", "Server address to connect to")
 	localPort := tunnelFlags.Int("port", 3000, "Local port to proxy requests to")
+	skipAuth := tunnelFlags.Bool("skip-auth", false, "Skip authentication (development/benchmark mode only)")
 
 	tunnelFlags.Parse(args)
 
-	// Load credentials
-	creds, err := client.LoadCredentials()
-	if err != nil {
-		log.Fatalf("Failed to load credentials: %v", err)
-	}
+	var creds *Credentials
+	var err error
 
-	log.Printf("Loaded credentials for user: %s", creds.Username)
+	if *skipAuth {
+		log.Println("⚠️  Running in skip-auth mode (development/benchmark only)")
+		creds = &Credentials{
+			Username: "benchmark-user",
+			Token:    "benchmark-token",
+		}
+	} else {
+		// Load credentials
+		creds, err = LoadCredentials()
+		if err != nil {
+			log.Fatalf("Failed to load credentials: %v", err)
+		}
+		log.Printf("Loaded credentials for user: %s", creds.Username)
+	}
 
 	// Setup graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -205,6 +225,15 @@ func handleTunnelCommand(args []string) {
 	}
 	defer conn.Close()
 
+	// Force connection close when context is cancelled to unblock decoder
+	go func() {
+		<-ctx.Done()
+		// Set read deadline to past time to interrupt any blocking reads
+		conn.SetReadDeadline(time.Now())
+		// Close connection to ensure cleanup
+		conn.Close()
+	}()
+
 	log.Printf("✓ Client ID: %s", clientID)
 	log.Printf("✓ Forwarding requests to localhost:%d", *localPort)
 	log.Printf("✓ Public URL: https://%s.localhost:8443", clientID)
@@ -221,10 +250,14 @@ func handleTunnelCommand(args []string) {
 				errChan <- nil
 				return
 			default:
-				log.Printf("[DEBUG] Waiting to decode request...")
+				if verbose {
+					log.Printf("[DEBUG] Waiting to decode request...")
+				}
 				var req protocol.TunnelRequest
 				err := decoder.Decode(&req)
-				log.Printf("[DEBUG] Decode returned, err=%v", err)
+				if verbose {
+					log.Printf("[DEBUG] Decode returned, err=%v", err)
+				}
 				if err != nil {
 					if ctx.Err() != nil {
 						// Context cancelled, normal shutdown

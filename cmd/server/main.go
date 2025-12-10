@@ -48,28 +48,37 @@ var (
 	writeTimeout  = flag.Duration("write_timeout", 10*time.Second, "HTTP write timeout")
 	tunnelTimeout = flag.Duration("tunnel_timeout", 30*time.Second, "Timeout for tunnel requests")
 	dbConnString  = flag.String("db_url", "", "PostgreSQL connection string")
+	skipAuth      = flag.Bool("skip-auth", false, "Skip authentication (development/benchmark mode only)")
+	verbose       = flag.Bool("verbose", false, "Enable verbose/debug logging")
 )
 
 func main() {
 	LoadEnv()
 	flag.Parse()
 
-	if *dbConnString == "" {
-		*dbConnString = os.Getenv("DATABASE_URL")
+	var authHandler *auth.Handler
+	var authValidator *auth.Validator
+
+	if *skipAuth {
+		log.Println("⚠️  Running in skip-auth mode (development/benchmark only)")
+	} else {
 		if *dbConnString == "" {
-			log.Fatal("Database connection string is required. Set DATABASE_URL environment variable or use -db flag")
+			*dbConnString = os.Getenv("DATABASE_URL")
+			if *dbConnString == "" {
+				log.Fatal("Database connection string is required. Set DATABASE_URL environment variable or use -db flag")
+			}
 		}
-	}
 
-	db, err := database.New(context.Background(), *dbConnString)
-	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
-	}
-	defer db.Close()
-	log.Println("✓ Connected to database")
+		db, err := database.New(context.Background(), *dbConnString)
+		if err != nil {
+			log.Fatalf("Failed to connect to database: %v", err)
+		}
+		defer db.Close()
+		log.Println("✓ Connected to database")
 
-	authHandler := auth.NewHandler(db.Queries)
-	authValidator := auth.NewValidator(db.Queries)
+		authHandler = auth.NewHandler(db.Queries)
+		authValidator = auth.NewValidator(db.Queries)
+	}
 
 	clients := make(map[string]*ClientConn)
 	clientsMx := sync.RWMutex{}
@@ -91,9 +100,12 @@ func main() {
 	log.Printf("HTTPS server will listen on %s", *httpPort)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/auth/register", authHandler.HandleRegister)
-	mux.HandleFunc("/auth/login", authHandler.HandleLogin)
-	mux.HandleFunc("/auth/rotate", authHandler.HandleRotate)
+
+	if !*skipAuth {
+		mux.HandleFunc("/auth/register", authHandler.HandleRegister)
+		mux.HandleFunc("/auth/login", authHandler.HandleLogin)
+		mux.HandleFunc("/auth/rotate", authHandler.HandleRotate)
+	}
 
 	mux.HandleFunc("/tunnel/ws", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[WS] New WebSocket connection attempt from %s", r.RemoteAddr)
@@ -110,7 +122,9 @@ func main() {
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		clientsMx.RLock()
-		log.Printf("[HTTP] %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+		if *verbose {
+			log.Printf("[HTTP] %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+		}
 		parts := strings.Split(r.Host, ".")
 		clientID := parts[0]
 
@@ -124,7 +138,9 @@ func main() {
 			return
 		}
 
-		log.Printf("[TUNNEL] → Forwarding to client %s: %s %s", clientID, r.Method, r.URL)
+		if *verbose {
+			log.Printf("[TUNNEL] → Forwarding to client %s: %s %s", clientID, r.Method, r.URL)
+		}
 
 		// Convert HTTP request to tunnel request
 		tunnelReq, err := protocol.ConvertHTTPRequest(r)
@@ -153,7 +169,9 @@ func main() {
 		}()
 
 		// Send request to client
-		log.Printf("[TUNNEL] Sending request ID %s to client", requestID)
+		if *verbose {
+			log.Printf("[TUNNEL] Sending request ID %s to client", requestID)
+		}
 		client.encoderMu.Lock()
 		err = client.encoder.Encode(tunnelReq)
 		client.encoderMu.Unlock()
@@ -163,7 +181,9 @@ func main() {
 			fmt.Fprintf(w, "Error communicating with tunnel\n")
 			return
 		}
-		log.Printf("[TUNNEL] Request %s sent, waiting for response...", requestID)
+		if *verbose {
+			log.Printf("[TUNNEL] Request %s sent, waiting for response...", requestID)
+		}
 
 		// Wait for response with timeout
 		var tunnelResp *protocol.TunnelResponse
@@ -186,7 +206,9 @@ func main() {
 		w.WriteHeader(tunnelResp.StatusCode)
 		w.Write(tunnelResp.Body)
 
-		log.Printf("[TUNNEL] ← Response: %d %s (%d bytes)", tunnelResp.StatusCode, http.StatusText(tunnelResp.StatusCode), len(tunnelResp.Body))
+		if *verbose {
+			log.Printf("[TUNNEL] ← Response: %d %s (%d bytes)", tunnelResp.StatusCode, http.StatusText(tunnelResp.StatusCode), len(tunnelResp.Body))
+		}
 	})
 
 	customerFacingServer := &http.Server{
@@ -239,14 +261,20 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 		return
 	}
 
-	userID, err := validator.ValidateToken(context.Background(), reg.Token)
-	if err != nil {
-		log.Printf("[WS] ✗ Invalid token from %s: %v", conn.RemoteAddr(), err)
-		encoder.Encode(protocol.RegistrationResponse{
-			Success: false,
-			Error:   fmt.Sprintf("Authentication failed: %v", err),
-		})
-		return
+	var userID int64
+	if *skipAuth {
+		log.Printf("[WS] Authentication skipped (development mode)")
+		userID = 0
+	} else {
+		userID, err = validator.ValidateToken(context.Background(), reg.Token)
+		if err != nil {
+			log.Printf("[WS] ✗ Invalid token from %s: %v", conn.RemoteAddr(), err)
+			encoder.Encode(protocol.RegistrationResponse{
+				Success: false,
+				Error:   fmt.Sprintf("Authentication failed: %v", err),
+			})
+			return
+		}
 	}
 
 	clientID := generateClientID()
@@ -301,9 +329,13 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 	}()
 
 	// Start goroutine to continuously read responses and route them
-	log.Printf("[CLIENT] Starting response reader loop for %s", clientID)
+	if *verbose {
+		log.Printf("[CLIENT] Starting response reader loop for %s", clientID)
+	}
 	for {
-		log.Printf("[CLIENT] Waiting to decode response from %s...", clientID)
+		if *verbose {
+			log.Printf("[CLIENT] Waiting to decode response from %s...", clientID)
+		}
 		var tunnelResp protocol.TunnelResponse
 		clientConn.decoderMu.Lock()
 		err := clientConn.decoder.Decode(&tunnelResp)
@@ -314,7 +346,9 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 			return
 		}
 
-		log.Printf("[CLIENT] Received response ID %s from %s", tunnelResp.RequestID, clientID)
+		if *verbose {
+			log.Printf("[CLIENT] Received response ID %s from %s", tunnelResp.RequestID, clientID)
+		}
 
 		// Route response to the correct waiting request
 		clientConn.pendingMu.RLock()
@@ -322,7 +356,9 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 		clientConn.pendingMu.RUnlock()
 
 		if ok {
-			log.Printf("[CLIENT] Routing response %s to waiting handler", tunnelResp.RequestID)
+			if *verbose {
+				log.Printf("[CLIENT] Routing response %s to waiting handler", tunnelResp.RequestID)
+			}
 			respChan <- &tunnelResp
 		} else {
 			log.Printf("[CLIENT] ✗ No pending request found for ID %s", tunnelResp.RequestID)
@@ -339,25 +375,32 @@ func generateClientID() string {
 
 // handleWebSocketPing sends periodic ping frames to keep WebSocket connection alive
 func handleWebSocketPing(ctx context.Context, conn *websocket.Conn, clientID string) {
-	ticker := time.NewTicker(30 * time.Second)
+	pingTime := 300 * time.Second
+	ticker := time.NewTicker(pingTime)
 	defer ticker.Stop()
 
 	conn.SetPongHandler(func(appData string) error {
-		log.Printf("[WS-PING] Received pong from %s", clientID)
-		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		if *verbose {
+			log.Printf("[WS-PING] Received pong from %s", clientID)
+		}
+		conn.SetReadDeadline(time.Now().Add((3 / 2) * pingTime))
 		return nil
 	})
 
-	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	conn.SetReadDeadline(time.Now().Add((3 / 2) * pingTime))
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[WS-PING] Stopping ping for %s", clientID)
+			if *verbose {
+				log.Printf("[WS-PING] Stopping ping for %s", clientID)
+			}
 			return
 		case <-ticker.C:
-			log.Printf("[WS-PING] Sending ping to %s", clientID)
-			err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second))
+			if *verbose {
+				log.Printf("[WS-PING] Sending ping to %s", clientID)
+			}
+			err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add((3/2)*pingTime))
 			if err != nil {
 				log.Printf("[WS-PING] Failed to send ping to %s: %v", clientID, err)
 				return
