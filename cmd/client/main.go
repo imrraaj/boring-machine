@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"boring-machine/internal/logger"
 	"boring-machine/internal/protocol"
 	"boring-machine/internal/wsio"
 
@@ -29,6 +30,9 @@ func main() {
 	flag.BoolVar(&verbose, "verbose", false, "Enable verbose/debug logging")
 	flag.Parse()
 
+	// Create verbose logger
+	verboseLog := logger.NewLogger(os.Stdout, verbose, "")
+
 	args := flag.Args()
 	if len(args) < 1 {
 		printUsage()
@@ -41,7 +45,7 @@ func main() {
 	case "auth":
 		handleAuthCommand(args[1:])
 	case "tunnel":
-		handleTunnelCommand(args[1:])
+		handleTunnelCommand(args[1:], verboseLog)
 	default:
 		fmt.Printf("Unknown command: %s\n", subcommand)
 		printUsage()
@@ -180,7 +184,7 @@ func connectAndRegister(ctx context.Context, serverAddr string, creds *Credentia
 	return wsConn, encoder, decoder, regResp.ClientID, nil
 }
 
-func handleTunnelCommand(args []string) {
+func handleTunnelCommand(args []string, verboseLog *log.Logger) {
 	tunnelFlags := flag.NewFlagSet("tunnel", flag.ExitOnError)
 	serverAddr := tunnelFlags.String("server", "localhost:8443", "Server address to connect to")
 	localPort := tunnelFlags.Int("port", 3000, "Local port to proxy requests to")
@@ -250,14 +254,10 @@ func handleTunnelCommand(args []string) {
 				errChan <- nil
 				return
 			default:
-				if verbose {
-					log.Printf("[DEBUG] Waiting to decode request...")
-				}
+				verboseLog.Printf("[DEBUG] Waiting to decode request...")
 				var req protocol.TunnelRequest
 				err := decoder.Decode(&req)
-				if verbose {
-					log.Printf("[DEBUG] Decode returned, err=%v", err)
-				}
+				verboseLog.Printf("[DEBUG] Decode returned, err=%v", err)
 				if err != nil {
 					if ctx.Err() != nil {
 						// Context cancelled, normal shutdown

@@ -3,6 +3,8 @@ package main
 import (
 	"boring-machine/internal/auth"
 	"boring-machine/internal/database"
+	"boring-machine/internal/html"
+	"boring-machine/internal/logger"
 	"boring-machine/internal/protocol"
 	"boring-machine/internal/wsio"
 	"context"
@@ -55,6 +57,9 @@ var (
 func main() {
 	LoadEnv()
 	flag.Parse()
+
+	// Create verbose logger
+	verboseLog := logger.NewLogger(os.Stdout, *verbose, "")
 
 	var authHandler *auth.Handler
 	var authValidator *auth.Validator
@@ -117,14 +122,12 @@ func main() {
 		}
 
 		log.Printf("[WS] Connection upgraded successfully from %s", r.RemoteAddr)
-		go handleClientConnection(wsConn, clients, &clientsMx, authValidator)
+		go handleClientConnection(wsConn, clients, &clientsMx, authValidator, verboseLog)
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		clientsMx.RLock()
-		if *verbose {
-			log.Printf("[HTTP] %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
-		}
+		verboseLog.Printf("[HTTP] %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 		parts := strings.Split(r.Host, ".")
 		clientID := parts[0]
 
@@ -133,20 +136,17 @@ func main() {
 
 		if client == nil {
 			log.Printf("[HTTP] ✗ Client '%s' not found", clientID)
-			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprintf(w, "Client '%s' not found\n", clientID)
+			html.RenderErrorPage(w, http.StatusNotFound, clientID, "client_not_found", "")
 			return
 		}
 
-		if *verbose {
-			log.Printf("[TUNNEL] → Forwarding to client %s: %s %s", clientID, r.Method, r.URL)
-		}
+		verboseLog.Printf("[TUNNEL] → Forwarding to client %s: %s %s", clientID, r.Method, r.URL)
 
 		// Convert HTTP request to tunnel request
 		tunnelReq, err := protocol.ConvertHTTPRequest(r)
 		if err != nil {
 			log.Printf("[TUNNEL] ✗ Error converting request: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
+			html.RenderErrorPage(w, http.StatusInternalServerError, clientID, "tunnel_error", err.Error())
 			return
 		}
 
@@ -169,21 +169,16 @@ func main() {
 		}()
 
 		// Send request to client
-		if *verbose {
-			log.Printf("[TUNNEL] Sending request ID %s to client", requestID)
-		}
+		verboseLog.Printf("[TUNNEL] Sending request ID %s to client", requestID)
 		client.encoderMu.Lock()
 		err = client.encoder.Encode(tunnelReq)
 		client.encoderMu.Unlock()
 		if err != nil {
 			log.Printf("[TUNNEL] ✗ Error sending to client: %v", err)
-			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprintf(w, "Error communicating with tunnel\n")
+			html.RenderErrorPage(w, http.StatusBadGateway, clientID, "tunnel_error", err.Error())
 			return
 		}
-		if *verbose {
-			log.Printf("[TUNNEL] Request %s sent, waiting for response...", requestID)
-		}
+		verboseLog.Printf("[TUNNEL] Request %s sent, waiting for response...", requestID)
 
 		// Wait for response with timeout
 		var tunnelResp *protocol.TunnelResponse
@@ -192,8 +187,14 @@ func main() {
 			// Got response
 		case <-time.After(*tunnelTimeout):
 			log.Printf("[TUNNEL] ✗ Timeout waiting for response")
-			w.WriteHeader(http.StatusGatewayTimeout)
-			fmt.Fprintf(w, "Timeout waiting for response from tunnel\n")
+			html.RenderErrorPage(w, http.StatusGatewayTimeout, clientID, "timeout", "")
+			return
+		}
+
+		// Check if this is an application down error
+		if html.IsApplicationDownError(tunnelResp.StatusCode, tunnelResp.Body) {
+			log.Printf("[TUNNEL] ✗ Application not responding")
+			html.RenderErrorPage(w, http.StatusBadGateway, clientID, "application_down", string(tunnelResp.Body))
 			return
 		}
 
@@ -206,9 +207,7 @@ func main() {
 		w.WriteHeader(tunnelResp.StatusCode)
 		w.Write(tunnelResp.Body)
 
-		if *verbose {
-			log.Printf("[TUNNEL] ← Response: %d %s (%d bytes)", tunnelResp.StatusCode, http.StatusText(tunnelResp.StatusCode), len(tunnelResp.Body))
-		}
+		verboseLog.Printf("[TUNNEL] ← Response: %d %s (%d bytes)", tunnelResp.StatusCode, http.StatusText(tunnelResp.StatusCode), len(tunnelResp.Body))
 	})
 
 	customerFacingServer := &http.Server{
@@ -245,7 +244,7 @@ func main() {
 	log.Println("Server shutdown complete")
 }
 
-func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn, clientsMx *sync.RWMutex, validator *auth.Validator) {
+func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn, clientsMx *sync.RWMutex, validator *auth.Validator, verboseLog *log.Logger) {
 	defer conn.Close()
 
 	log.Printf("[WS] New connection from %s", conn.RemoteAddr())
@@ -317,7 +316,7 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 	log.Printf("[WS] ✓ Client registered: %s (user: %d) from %s", clientID, userID, conn.RemoteAddr())
 	log.Printf("[WS] Active clients: %d", activeClients)
 
-	go handleWebSocketPing(pingCtx, conn, clientID)
+	go handleWebSocketPing(pingCtx, conn, clientID, verboseLog)
 
 	defer func() {
 		pingCancel()
@@ -329,13 +328,9 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 	}()
 
 	// Start goroutine to continuously read responses and route them
-	if *verbose {
-		log.Printf("[CLIENT] Starting response reader loop for %s", clientID)
-	}
+	verboseLog.Printf("[CLIENT] Starting response reader loop for %s", clientID)
 	for {
-		if *verbose {
-			log.Printf("[CLIENT] Waiting to decode response from %s...", clientID)
-		}
+		verboseLog.Printf("[CLIENT] Waiting to decode response from %s...", clientID)
 		var tunnelResp protocol.TunnelResponse
 		clientConn.decoderMu.Lock()
 		err := clientConn.decoder.Decode(&tunnelResp)
@@ -346,9 +341,7 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 			return
 		}
 
-		if *verbose {
-			log.Printf("[CLIENT] Received response ID %s from %s", tunnelResp.RequestID, clientID)
-		}
+		verboseLog.Printf("[CLIENT] Received response ID %s from %s", tunnelResp.RequestID, clientID)
 
 		// Route response to the correct waiting request
 		clientConn.pendingMu.RLock()
@@ -356,9 +349,7 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 		clientConn.pendingMu.RUnlock()
 
 		if ok {
-			if *verbose {
-				log.Printf("[CLIENT] Routing response %s to waiting handler", tunnelResp.RequestID)
-			}
+			verboseLog.Printf("[CLIENT] Routing response %s to waiting handler", tunnelResp.RequestID)
 			respChan <- &tunnelResp
 		} else {
 			log.Printf("[CLIENT] ✗ No pending request found for ID %s", tunnelResp.RequestID)
@@ -374,15 +365,13 @@ func generateClientID() string {
 }
 
 // handleWebSocketPing sends periodic ping frames to keep WebSocket connection alive
-func handleWebSocketPing(ctx context.Context, conn *websocket.Conn, clientID string) {
+func handleWebSocketPing(ctx context.Context, conn *websocket.Conn, clientID string, verboseLog *log.Logger) {
 	pingTime := 300 * time.Second
 	ticker := time.NewTicker(pingTime)
 	defer ticker.Stop()
 
 	conn.SetPongHandler(func(appData string) error {
-		if *verbose {
-			log.Printf("[WS-PING] Received pong from %s", clientID)
-		}
+		verboseLog.Printf("[WS-PING] Received pong from %s", clientID)
 		conn.SetReadDeadline(time.Now().Add((3 / 2) * pingTime))
 		return nil
 	})
@@ -392,14 +381,10 @@ func handleWebSocketPing(ctx context.Context, conn *websocket.Conn, clientID str
 	for {
 		select {
 		case <-ctx.Done():
-			if *verbose {
-				log.Printf("[WS-PING] Stopping ping for %s", clientID)
-			}
+			verboseLog.Printf("[WS-PING] Stopping ping for %s", clientID)
 			return
 		case <-ticker.C:
-			if *verbose {
-				log.Printf("[WS-PING] Sending ping to %s", clientID)
-			}
+			verboseLog.Printf("[WS-PING] Sending ping to %s", clientID)
 			err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add((3/2)*pingTime))
 			if err != nil {
 				log.Printf("[WS-PING] Failed to send ping to %s: %v", clientID, err)

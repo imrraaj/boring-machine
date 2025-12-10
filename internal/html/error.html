@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error {{.StatusCode}} | Boring Machine</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&family=Nabla&family=Space+Grotesk:wght@300..700&family=Tourney:ital,wght@0,100..900;1,100..900&display=swap');
+
+        :root {
+            --bg-color: #f0f0f0;
+            --card-bg: #ffffff;
+            --text-main: #111111;
+            --text-muted: #666666;
+            --border-color: #333333;
+            --status-ok: #00cc66;
+            --status-err: #ff3333;
+            --font-mono: 'Geist Mono', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: var(--font-mono);
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            background: var(--card-bg);
+            border: 2px solid var(--border-color);
+            max-width: 900px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        /* Header Section */
+        .header {
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            flex-wrap: wrap;
+            font-family: 'Tourney', 'Geist Mono', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+
+        .brand {
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: -1px;
+            font-size: 1.2rem;
+        }
+
+        .status-code {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+
+        /* The Horizontal Pipeline */
+        .pipeline-container {
+            margin: 40px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+        }
+
+        /* The connecting line behind the nodes */
+        .pipeline-line {
+            position: absolute;
+            top: 25px;
+            /* Half of node height roughly */
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #e0e0e0;
+            z-index: 0;
+        }
+
+        .node {
+            position: relative;
+            z-index: 1;
+            background: var(--card-bg);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 120px;
+            text-align: center;
+        }
+
+        .node-indicator {
+            width: 50px;
+            height: 50px;
+            border: 2px solid var(--border-color);
+            background: var(--card-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 10px;
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+
+        .node-label {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        .node-status {
+            font-size: 0.75rem;
+            margin-top: 4px;
+            color: var(--text-muted);
+        }
+
+        /* Status States */
+        .status-ok .node-indicator {
+            border-color: var(--status-ok);
+            color: var(--status-ok);
+            background: #eeffee;
+        }
+
+        .status-err .node-indicator {
+            border-color: var(--status-err);
+            color: var(--status-err);
+            background: #ffeeee;
+        }
+
+        /* Dashed line for broken connections - optional CSS logic could go here, 
+           but simplified for the template */
+
+        /* Main Content */
+        .main-message {
+            background: #eee;
+            border-left: 4px solid var(--text-main);
+            padding: 15px;
+            margin-bottom: 30px;
+        }
+
+        .main-message h2 {
+            margin: 0 0 10px 0;
+            font-size: 1.1rem;
+        }
+
+        .main-message p {
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        /* Help Section */
+        .help-section {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .help-box {
+            flex: 1;
+            min-width: 250px;
+            border: 1px solid #ddd;
+            padding: 20px;
+        }
+
+        .help-box h3 {
+            margin-top: 0;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+        }
+
+        ul {
+            padding-left: 20px;
+            margin-bottom: 0;
+        }
+
+        li {
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+        }
+
+        /* Footer / Technical */
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px dashed #ccc;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .tech-details {
+            margin-top: 10px;
+            font-family: var(--font-mono);
+            word-break: break-all;
+        }
+
+        @media (max-width: 600px) {
+            .pipeline-container {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 20px;
+            }
+
+            .pipeline-line {
+                display: none;
+            }
+
+            .node {
+                flex-direction: row;
+                width: 100%;
+                text-align: left;
+                gap: 15px;
+            }
+
+            .node-indicator {
+                margin-bottom: 0;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="brand">Boring Machine<span style="font-weight:normal">_Tunnel</span></div>
+            <div class="status-code">ERR_{{.StatusCode}}</div>
+        </div>
+
+        <div class="pipeline-container">
+            <div class="pipeline-line"></div>
+
+            <div class="node {{if .ServerStatus}}status-ok{{else}}status-err{{end}}">
+                <div class="node-indicator">{{if .ServerStatus}}✓{{else}}X{{end}}</div>
+                <div>
+                    <div class="node-label">Server</div>
+                    <div class="node-status">{{if .ServerStatus}}Online{{else}}Offline{{end}}</div>
+                </div>
+            </div>
+
+            <div class="node {{if .TunnelStatus}}status-ok{{else}}status-err{{end}}">
+                <div class="node-indicator">{{if .TunnelStatus}}✓{{else}}X{{end}}</div>
+                <div>
+                    <div class="node-label">Tunnel</div>
+                    <div class="node-status">{{if .TunnelStatus}}Active{{else}}Broken{{end}}</div>
+                </div>
+            </div>
+
+            <div class="node {{if .ClientStatus}}status-ok{{else}}status-err{{end}}">
+                <div class="node-indicator">{{if .ClientStatus}}✓{{else}}X{{end}}</div>
+                <div>
+                    <div class="node-label">Client</div>
+                    <div class="node-status">{{if .ClientStatus}}Connected{{else}}Missing{{end}}</div>
+                </div>
+            </div>
+
+            <div class="node {{if .ApplicationStatus}}status-ok{{else}}status-err{{end}}">
+                <div class="node-indicator">{{if .ApplicationStatus}}✓{{else}}X{{end}}</div>
+                <div>
+                    <div class="node-label">App</div>
+                    <div class="node-status">{{if .Port}}Port {{.Port}}{{else}}Target{{end}}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-message">
+            <h2>{{.ErrorTitle}}</h2>
+            <p>{{.ErrorMessage}}</p>
+        </div>
+
+        <div class="help-section">
+            {{if .HelpText}}
+            <div class="help-box">
+                <h3>Troubleshooting</h3>
+                {{.HelpText}}
+            </div>
+            {{end}}
+
+            <div class="help-box">
+                <h3>Diagnostics</h3>
+                {{if .ClientID}}
+                <div><strong>ID:</strong> {{.ClientID}}</div>
+                {{end}}
+                {{if .Details}}
+                <div class="tech-details">{{.Details}}</div>
+                {{end}}
+            </div>
+        </div>
+
+        <div class="footer">
+            generated by boring-machine // timestamp {{.StatusCode}}
+        </div>
+    </div>
+</body>
+
+</html>
