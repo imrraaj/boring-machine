@@ -4,13 +4,13 @@ import (
 	"boring-machine/internal/auth"
 	"boring-machine/internal/database"
 	"boring-machine/internal/protocol"
+	"boring-machine/internal/wsio"
 	"context"
-	"crypto/tls"
+	"crypto/rand"
 	"encoding/gob"
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,7 +24,7 @@ import (
 
 // ClientConn wraps a connection with its encoder/decoder and mutex
 type ClientConn struct {
-	conn            protocol.TunnelConn
+	conn            *websocket.Conn
 	encoder         *gob.Encoder
 	decoder         *gob.Decoder
 	encoderMu       sync.Mutex
@@ -44,8 +44,6 @@ var upgrader = websocket.Upgrader{
 
 var (
 	httpPort      = flag.String("http_port", ":8443", "HTTPS port for customer-facing server")
-	certFile      = flag.String("cert", "certs/cert.pem", "TLS certificate file")
-	keyFile       = flag.String("key", "certs/key.pem", "TLS key file")
 	readTimeout   = flag.Duration("read_timeout", 10*time.Second, "HTTP read timeout")
 	writeTimeout  = flag.Duration("write_timeout", 10*time.Second, "HTTP write timeout")
 	tunnelTimeout = flag.Duration("tunnel_timeout", 30*time.Second, "Timeout for tunnel requests")
@@ -100,7 +98,6 @@ func main() {
 	mux.HandleFunc("/tunnel/ws", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[WS] New WebSocket connection attempt from %s", r.RemoteAddr)
 
-		// Upgrade to WebSocket
 		wsConn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Printf("[WS] Failed to upgrade connection: %v", err)
@@ -108,9 +105,7 @@ func main() {
 		}
 
 		log.Printf("[WS] Connection upgraded successfully from %s", r.RemoteAddr)
-
-		tunnelConn := protocol.NewWebSocketConn(wsConn)
-		go handleClientConnection(tunnelConn, clients, &clientsMx, authValidator)
+		go handleClientConnection(wsConn, clients, &clientsMx, authValidator)
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -194,19 +189,9 @@ func main() {
 		log.Printf("[TUNNEL] ← Response: %d %s (%d bytes)", tunnelResp.StatusCode, http.StatusText(tunnelResp.StatusCode), len(tunnelResp.Body))
 	})
 
-	// certs, err := tls.LoadX509KeyPair(*certFile, *keyFile)
-	// if err != nil {
-	// 	log.Fatalf("Failed to load TLS certificates: %v", err)
-	// }
-	// tlsConfig := &tls.Config{
-	// 	Certificates:       []tls.Certificate{certs},
-	// 	InsecureSkipVerify: true,
-	// }
-
 	customerFacingServer := &http.Server{
-		Addr:    *httpPort,
-		Handler: mux,
-		// TLSConfig:    tlsConfig,
+		Addr:         *httpPort,
+		Handler:      mux,
 		ReadTimeout:  *readTimeout,
 		WriteTimeout: *writeTimeout,
 	}
@@ -238,51 +223,44 @@ func main() {
 	log.Println("Server shutdown complete")
 }
 
-func handleClientConnection(conn protocol.TunnelConn, clients map[string]*ClientConn, clientsMx *sync.RWMutex, validator *auth.Validator) {
+func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn, clientsMx *sync.RWMutex, validator *auth.Validator) {
 	defer conn.Close()
 
-	connType := conn.ConnectionType()
-	log.Printf("[%s] New connection from %s", strings.ToUpper(connType), conn.RemoteAddr())
+	log.Printf("[WS] New connection from %s", conn.RemoteAddr())
 
-	// Enable TCP keepalive for TCP connections
-	if connType == "tcp" {
-		if tcpConn, ok := conn.(*protocol.TCPConn); ok {
-			if tlsConn, ok := tcpConn.Conn.(*tls.Conn); ok {
-				if tc, ok := tlsConn.NetConn().(*net.TCPConn); ok {
-					tc.SetKeepAlive(true)
-					tc.SetKeepAlivePeriod(30 * time.Second)
-				}
-			}
-		}
-	}
+	wsrw := wsio.New(conn)
+	encoder := gob.NewEncoder(wsrw)
+	decoder := gob.NewDecoder(wsrw)
 
-	encoder := gob.NewEncoder(conn)
-	decoder := gob.NewDecoder(conn)
-
-	// Read client registration
 	var reg protocol.ClientRegister
 	err := decoder.Decode(&reg)
 	if err != nil {
-		log.Printf("[CLIENT] ✗ Error reading registration from %s: %v", conn.RemoteAddr(), err)
+		log.Printf("[WS] ✗ Error reading registration from %s: %v", conn.RemoteAddr(), err)
 		return
 	}
 
-	// Validate token
 	userID, err := validator.ValidateToken(context.Background(), reg.Token)
 	if err != nil {
-		log.Printf("[CLIENT] ✗ Invalid token from %s: %v", conn.RemoteAddr(), err)
-		// Send error message to client
-		errorMsg := map[string]string{"error": fmt.Sprintf("Authentication failed: %v", err)}
-		encoder.Encode(errorMsg)
+		log.Printf("[WS] ✗ Invalid token from %s: %v", conn.RemoteAddr(), err)
+		encoder.Encode(protocol.RegistrationResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Authentication failed: %v", err),
+		})
 		return
 	}
 
-	log.Printf("[%s] ✓ Client registered: %s (user: %d) from %s", strings.ToUpper(connType), reg.ClientID, userID, conn.RemoteAddr())
+	clientID := generateClientID()
 
-	// Create context for ping cancellation
+	clientsMx.Lock()
+	for {
+		if _, exists := clients[clientID]; !exists {
+			break
+		}
+		clientID = generateClientID()
+	}
+
 	pingCtx, pingCancel := context.WithCancel(context.Background())
 
-	// Store client connection
 	clientConn := &ClientConn{
 		conn:            conn,
 		encoder:         encoder,
@@ -291,45 +269,52 @@ func handleClientConnection(conn protocol.TunnelConn, clients map[string]*Client
 		cancelPing:      pingCancel,
 	}
 
-	clientsMx.Lock()
-	clients[reg.ClientID] = clientConn
+	clients[clientID] = clientConn
 	activeClients := len(clients)
 	clientsMx.Unlock()
 
-	log.Printf("[%s] Active clients: %d", strings.ToUpper(connType), activeClients)
-
-	// Start ping goroutine for WebSocket connections
-	if connType == "websocket" {
-		if wsConn, ok := conn.(*protocol.WebSocketConn); ok {
-			go handleWebSocketPing(pingCtx, wsConn, reg.ClientID)
-		}
+	err = encoder.Encode(protocol.RegistrationResponse{
+		Success:  true,
+		ClientID: clientID,
+		Error:    "",
+	})
+	if err != nil {
+		log.Printf("[WS] ✗ Failed to send registration response: %v", err)
+		clientsMx.Lock()
+		delete(clients, clientID)
+		clientsMx.Unlock()
+		return
 	}
 
-	// Clean up on disconnect
+	log.Printf("[WS] ✓ Client registered: %s (user: %d) from %s", clientID, userID, conn.RemoteAddr())
+	log.Printf("[WS] Active clients: %d", activeClients)
+
+	go handleWebSocketPing(pingCtx, conn, clientID)
+
 	defer func() {
-		pingCancel() // Stop ping goroutine
+		pingCancel()
 		clientsMx.Lock()
-		delete(clients, reg.ClientID)
+		delete(clients, clientID)
 		activeClients := len(clients)
 		clientsMx.Unlock()
-		log.Printf("[%s] ✗ Client disconnected: %s (active: %d)", strings.ToUpper(connType), reg.ClientID, activeClients)
+		log.Printf("[WS] ✗ Client disconnected: %s (active: %d)", clientID, activeClients)
 	}()
 
 	// Start goroutine to continuously read responses and route them
-	log.Printf("[CLIENT] Starting response reader loop for %s", reg.ClientID)
+	log.Printf("[CLIENT] Starting response reader loop for %s", clientID)
 	for {
-		log.Printf("[CLIENT] Waiting to decode response from %s...", reg.ClientID)
+		log.Printf("[CLIENT] Waiting to decode response from %s...", clientID)
 		var tunnelResp protocol.TunnelResponse
 		clientConn.decoderMu.Lock()
 		err := clientConn.decoder.Decode(&tunnelResp)
 		clientConn.decoderMu.Unlock()
 
 		if err != nil {
-			log.Printf("[CLIENT] ✗ Error reading response from %s: %v", reg.ClientID, err)
+			log.Printf("[CLIENT] ✗ Error reading response from %s: %v", clientID, err)
 			return
 		}
 
-		log.Printf("[CLIENT] Received response ID %s from %s", tunnelResp.RequestID, reg.ClientID)
+		log.Printf("[CLIENT] Received response ID %s from %s", tunnelResp.RequestID, clientID)
 
 		// Route response to the correct waiting request
 		clientConn.pendingMu.RLock()
@@ -345,22 +330,24 @@ func handleClientConnection(conn protocol.TunnelConn, clients map[string]*Client
 	}
 }
 
+// generateClientID generates a random client ID
+func generateClientID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
+
 // handleWebSocketPing sends periodic ping frames to keep WebSocket connection alive
-func handleWebSocketPing(ctx context.Context, conn *protocol.WebSocketConn, clientID string) {
+func handleWebSocketPing(ctx context.Context, conn *websocket.Conn, clientID string) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	wsConn := conn.GetWebSocketConn()
-
-	// Set pong handler to reset read deadline
-	wsConn.SetPongHandler(func(appData string) error {
+	conn.SetPongHandler(func(appData string) error {
 		log.Printf("[WS-PING] Received pong from %s", clientID)
-		// Reset read deadline on pong
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
 
-	// Set initial read deadline
 	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 	for {
@@ -370,7 +357,7 @@ func handleWebSocketPing(ctx context.Context, conn *protocol.WebSocketConn, clie
 			return
 		case <-ticker.C:
 			log.Printf("[WS-PING] Sending ping to %s", clientID)
-			err := wsConn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second))
+			err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second))
 			if err != nil {
 				log.Printf("[WS-PING] Failed to send ping to %s: %v", clientID, err)
 				return

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/tls"
 	"encoding/gob"
 	"flag"
@@ -19,6 +18,7 @@ import (
 
 	"boring-machine/internal/client"
 	"boring-machine/internal/protocol"
+	"boring-machine/internal/wsio"
 
 	"github.com/gorilla/websocket"
 )
@@ -134,39 +134,47 @@ func dialWebSocket(serverAddr string) (*websocket.Conn, error) {
 	return conn, nil
 }
 
-func connectAndRegister(ctx context.Context, serverAddr string, creds *client.Credentials, clientID string) (protocol.TunnelConn, *gob.Encoder, *gob.Decoder, error) {
+func connectAndRegister(ctx context.Context, serverAddr string, creds *client.Credentials) (*websocket.Conn, *gob.Encoder, *gob.Decoder, string, error) {
 
 	log.Printf("Connecting to server at %s using websocket...", serverAddr)
 
-	var conn protocol.TunnelConn
-	var err error
-
 	wsConn, err := dialWebSocket(serverAddr)
 	if err != nil {
-		log.Fatalf("Websocket DialError: %s", err)
+		return nil, nil, nil, "", fmt.Errorf("websocket dial failed: %w", err)
 	}
-	conn = protocol.NewWebSocketConn(wsConn)
-	encoder := gob.NewEncoder(conn)
-	decoder := gob.NewDecoder(conn)
+
+	wsrw := wsio.New(wsConn)
+	encoder := gob.NewEncoder(wsrw)
+	decoder := gob.NewDecoder(wsrw)
 
 	err = encoder.Encode(protocol.ClientRegister{
-		ClientID: clientID,
-		Token:    creds.Token,
+		Token: creds.Token,
 	})
 	if err != nil {
-		log.Printf("Registration failed: %v", err)
-		conn.Close()
+		wsConn.Close()
+		return nil, nil, nil, "", fmt.Errorf("failed to send registration: %w", err)
 	}
 
-	log.Printf("✓ Connected and registered with server")
-	return conn, encoder, decoder, nil
+	var regResp protocol.RegistrationResponse
+	err = decoder.Decode(&regResp)
+	if err != nil {
+		wsConn.Close()
+		return nil, nil, nil, "", fmt.Errorf("failed to receive registration response: %w", err)
+	}
+
+	if !regResp.Success {
+		wsConn.Close()
+		return nil, nil, nil, "", fmt.Errorf("registration failed: %s", regResp.Error)
+	}
+
+	log.Printf("✓ Connected and registered with server (ID: %s)", regResp.ClientID)
+	return wsConn, encoder, decoder, regResp.ClientID, nil
 }
 
 func handleTunnelCommand(args []string) {
 	tunnelFlags := flag.NewFlagSet("tunnel", flag.ExitOnError)
 	serverAddr := tunnelFlags.String("server", "localhost:8443", "Server address to connect to")
 	localPort := tunnelFlags.Int("port", 3000, "Local port to proxy requests to")
-	insecure := tunnelFlags.Bool("insecure", true, "Skip TLS certificate verification")
 
 	tunnelFlags.Parse(args)
 
@@ -191,17 +199,13 @@ func handleTunnelCommand(args []string) {
 		cancel()
 	}()
 
-	// Generate random client ID
-	clientID := generateClientID()
-	log.Printf("Client ID: %s", clientID)
-
-	// Connect to server with retry
-	conn, encoder, decoder, err := connectAndRegister(ctx, *serverAddr, creds, clientID)
+	conn, encoder, decoder, clientID, err := connectAndRegister(ctx, *serverAddr, creds)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
 	defer conn.Close()
 
+	log.Printf("✓ Client ID: %s", clientID)
 	log.Printf("✓ Forwarding requests to localhost:%d", *localPort)
 	log.Printf("✓ Public URL: https://%s.localhost:8443", clientID)
 
@@ -321,10 +325,4 @@ func proxyToLocal(tunnelReq *protocol.TunnelRequest, localPort int) *protocol.Tu
 		Headers:    resp.Header,
 		Body:       body,
 	}
-}
-
-func generateClientID() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return fmt.Sprintf("%x", b)
 }
