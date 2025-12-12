@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boring Machine - Server Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 2em;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            background: #10b981;
+            color: white;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+
+        .header-info {
+            margin-top: 15px;
+            color: #6b7280;
+            font-size: 0.95em;
+        }
+
+        .header-info span {
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+        }
+
+        .card h2 {
+            font-size: 1.2em;
+            color: #667eea;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #f3f4f6;
+            padding-bottom: 10px;
+            display: flex;
+            align-items: center;
+        }
+
+        .card h2::before {
+            content: attr(data-icon);
+            margin-right: 8px;
+            font-size: 1.3em;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .metric:last-child { border-bottom: none; }
+
+        .metric-label {
+            color: #6b7280;
+            font-size: 0.95em;
+        }
+
+        .metric-value {
+            font-weight: 600;
+            color: #111827;
+            font-size: 1.1em;
+        }
+
+        .clients-table {
+            width: 100%;
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .clients-table h2 {
+            margin-bottom: 20px;
+            color: #667eea;
+            font-size: 1.3em;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px;
+            background: #f9fafb;
+            color: #667eea;
+            font-weight: 600;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            padding: 12px;
+            border-top: 1px solid #e5e7eb;
+            font-size: 0.95em;
+        }
+
+        tr:hover {
+            background: #f9fafb;
+        }
+
+        code {
+            background: #f3f4f6;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #667eea;
+        }
+
+        .refresh-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            font-size: 0.9em;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .updating {
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        .no-data {
+            text-align: center;
+            color: #9ca3af;
+            padding: 20px;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="refresh-indicator" id="refreshIndicator">
+        ⟳ <span id="countdown">5</span>s
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h1>🚇 Boring Machine Dashboard</h1>
+            <span class="status-badge">● Server Running</span>
+            <div class="header-info">
+                <div>Started: <span id="startTime">-</span></div>
+                <div>Uptime: <span id="uptime">-</span></div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h2 data-icon="📊">Server Status</h2>
+                <div class="metric">
+                    <span class="metric-label">Active Tunnels</span>
+                    <span class="metric-value" id="activeClients">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Total Connections</span>
+                    <span class="metric-value" id="totalConnections">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Goroutines</span>
+                    <span class="metric-value" id="goroutines">-</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 data-icon="💻">System Resources</h2>
+                <div class="metric">
+                    <span class="metric-label">CPU Usage</span>
+                    <span class="metric-value" id="cpuUsage">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Memory Usage</span>
+                    <span class="metric-value" id="memoryUsage">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">CPU Cores</span>
+                    <span class="metric-value" id="numCPU">-</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 data-icon="📈">Request Metrics</h2>
+                <div class="metric">
+                    <span class="metric-label">Forwarded</span>
+                    <span class="metric-value" id="requestsForwarded">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Failed</span>
+                    <span class="metric-value" id="requestsFailed">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Success Rate</span>
+                    <span class="metric-value" id="successRate">-</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="clients-table">
+            <h2>🔌 Active Tunnel Clients</h2>
+            <table id="clientsTable">
+                <thead>
+                    <tr>
+                        <th>Client ID</th>
+                        <th>User ID</th>
+                        <th>Remote Address</th>
+                        <th>Connected</th>
+                        <th>Requests</th>
+                        <th>Last Activity</th>
+                    </tr>
+                </thead>
+                <tbody id="clientsTableBody">
+                    <tr><td colspan="6" class="no-data">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let refreshInterval = 5000; // 5 seconds
+        let countdownValue = 5;
+
+        function formatUptime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${hours}h ${minutes}m ${secs}s`;
+        }
+
+        function formatTimestamp(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleString();
+        }
+
+        function formatTimeAgo(isoString) {
+            const now = new Date();
+            const then = new Date(isoString);
+            const seconds = Math.floor((now - then) / 1000);
+
+            if (seconds < 60) return `${seconds}s ago`;
+            if (seconds < 3600) return `${Math.floor(seconds/60)}m ago`;
+            if (seconds < 86400) return `${Math.floor(seconds/3600)}h ago`;
+            return `${Math.floor(seconds/86400)}d ago`;
+        }
+
+        async function fetchMetrics() {
+            const indicator = document.getElementById('refreshIndicator');
+            indicator.classList.add('updating');
+
+            try {
+                const response = await fetch('/admin/api/metrics');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+
+                // Update server info
+                document.getElementById('startTime').textContent = formatTimestamp(data.server.start_time);
+                document.getElementById('uptime').textContent = formatUptime(data.server.uptime_seconds);
+
+                // Update connection metrics
+                document.getElementById('activeClients').textContent = data.connections.active;
+                document.getElementById('totalConnections').textContent = data.connections.total_accepted;
+                document.getElementById('goroutines').textContent = data.system.num_goroutines;
+
+                // Update system metrics
+                document.getElementById('cpuUsage').textContent = data.system.cpu_usage_percent.toFixed(1) + '%';
+                document.getElementById('memoryUsage').textContent =
+                    `${data.system.memory_used_mb} MB (${data.system.memory_percent.toFixed(1)}%)`;
+                document.getElementById('numCPU').textContent = data.system.num_cpu;
+
+                // Update request metrics
+                document.getElementById('requestsForwarded').textContent = data.requests.forwarded;
+                document.getElementById('requestsFailed').textContent = data.requests.failed;
+                const total = data.requests.forwarded + data.requests.failed;
+                const successRate = total > 0 ? (data.requests.forwarded / total * 100).toFixed(2) : 100;
+                document.getElementById('successRate').textContent = successRate + '%';
+
+                // Update clients table
+                const tbody = document.getElementById('clientsTableBody');
+                if (data.clients.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="no-data">No active clients</td></tr>';
+                } else {
+                    tbody.innerHTML = data.clients.map(client => `
+                        <tr>
+                            <td><code>${client.client_id}</code></td>
+                            <td>${client.user_id}</td>
+                            <td>${client.remote_addr}</td>
+                            <td>${formatTimeAgo(client.connected_at)}</td>
+                            <td>${client.request_count}</td>
+                            <td>${client.last_request_at ? formatTimeAgo(client.last_request_at) : 'Never'}</td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Failed to fetch metrics:', error);
+                // Optionally display error in UI
+            }
+
+            indicator.classList.remove('updating');
+        }
+
+        // Initial fetch
+        fetchMetrics();
+
+        // Auto-refresh every 5 seconds
+        setInterval(fetchMetrics, refreshInterval);
+
+        // Countdown timer
+        setInterval(() => {
+            countdownValue--;
+            if (countdownValue <= 0) countdownValue = 5;
+            document.getElementById('countdown').textContent = countdownValue;
+        }, 1000);
+    </script>
+</body>
+</html>

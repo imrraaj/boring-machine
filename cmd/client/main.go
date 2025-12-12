@@ -128,8 +128,14 @@ func handleRotate(args []string) {
 }
 
 // dialWebSocket connects to the server using WebSocket
-func dialWebSocket(serverAddr string) (*websocket.Conn, error) {
-	wsURL := fmt.Sprintf("ws://%s/tunnel/ws", serverAddr)
+func dialWebSocket(serverAddr string, secure bool) (*websocket.Conn, error) {
+	protocol := "ws"
+	if secure {
+		protocol = "wss"
+	}
+	wsURL := fmt.Sprintf("%s://%s/tunnel/ws", protocol, serverAddr)
+
+	log.Printf("Attempting to connect via %s...", wsURL)
 
 	dialer := websocket.Dialer{
 		TLSClientConfig: &tls.Config{
@@ -139,19 +145,34 @@ func dialWebSocket(serverAddr string) (*websocket.Conn, error) {
 		WriteBufferSize: 4096,
 	}
 
-	conn, _, err := dialer.Dial(wsURL, nil)
+	conn, resp, err := dialer.Dial(wsURL, nil)
+
+	// If ws:// fails and we haven't tried wss:// yet, auto-detect and try wss://
+	if err != nil && !secure {
+		log.Printf("WebSocket connection failed: %v", err)
+		log.Printf("Attempting secure connection (wss://)...")
+		wsURL = fmt.Sprintf("wss://%s/tunnel/ws", serverAddr)
+		conn, resp, err = dialer.Dial(wsURL, nil)
+		if err == nil {
+			log.Printf("✓ Successfully connected via wss:// (auto-detected)")
+		}
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("websocket dial failed: %w", err)
+	}
+	if resp != nil {
+		resp.Body.Close()
 	}
 
 	return conn, nil
 }
 
-func connectAndRegister(ctx context.Context, serverAddr string, creds *Credentials) (*websocket.Conn, *gob.Encoder, *gob.Decoder, string, error) {
+func connectAndRegister(ctx context.Context, serverAddr string, secure bool, creds *Credentials) (*websocket.Conn, *gob.Encoder, *gob.Decoder, string, error) {
 
 	log.Printf("Connecting to server at %s using websocket...", serverAddr)
 
-	wsConn, err := dialWebSocket(serverAddr)
+	wsConn, err := dialWebSocket(serverAddr, secure)
 	if err != nil {
 		return nil, nil, nil, "", fmt.Errorf("websocket dial failed: %w", err)
 	}
@@ -186,10 +207,12 @@ func connectAndRegister(ctx context.Context, serverAddr string, creds *Credentia
 
 func handleTunnelCommand(args []string, verboseLog *log.Logger) {
 	tunnelFlags := flag.NewFlagSet("tunnel", flag.ExitOnError)
+	applicationNetwork := tunnelFlags.String("network", "127.0.0.1", "Network to connect to")
+	applicationPort := tunnelFlags.Int("port", 3000, "Local port to proxy requests to")
 	serverAddr := tunnelFlags.String("server", "localhost:8443", "Server address to connect to")
-	localPort := tunnelFlags.Int("port", 3000, "Local port to proxy requests to")
 	skipAuth := tunnelFlags.Bool("skip-auth", false, "Skip authentication (development/benchmark mode only)")
-
+	secure := tunnelFlags.Bool("secure", false, "Use secure WebSocket (wss://) instead of ws://")
+	token := tunnelFlags.String("token", "", "Token to authenticate to server")
 	tunnelFlags.Parse(args)
 
 	var creds *Credentials
@@ -202,12 +225,21 @@ func handleTunnelCommand(args []string, verboseLog *log.Logger) {
 			Token:    "benchmark-token",
 		}
 	} else {
-		// Load credentials
-		creds, err = LoadCredentials()
-		if err != nil {
-			log.Fatalf("Failed to load credentials: %v", err)
+		// If token flag is explicitly provided, use it
+		if *token != "" {
+			log.Println("Using token from --token flag")
+			creds = &Credentials{
+				Username: "cli-user",
+				Token:    *token,
+			}
+		} else {
+			// Otherwise, load credentials from file
+			creds, err = LoadCredentials()
+			if err != nil {
+				log.Fatalf("Failed to load credentials: %v", err)
+			}
+			log.Printf("Loaded credentials for user: %s", creds.Username)
 		}
-		log.Printf("Loaded credentials for user: %s", creds.Username)
 	}
 
 	// Setup graceful shutdown
@@ -223,7 +255,7 @@ func handleTunnelCommand(args []string, verboseLog *log.Logger) {
 		cancel()
 	}()
 
-	conn, encoder, decoder, clientID, err := connectAndRegister(ctx, *serverAddr, creds)
+	conn, encoder, decoder, clientID, err := connectAndRegister(ctx, *serverAddr, *secure, creds)
 	if err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
@@ -239,8 +271,8 @@ func handleTunnelCommand(args []string, verboseLog *log.Logger) {
 	}()
 
 	log.Printf("✓ Client ID: %s", clientID)
-	log.Printf("✓ Forwarding requests to localhost:%d", *localPort)
-	log.Printf("✓ Public URL: https://%s.localhost:8443", clientID)
+	log.Printf("✓ Forwarding requests to %s:%d", *applicationNetwork, *applicationPort)
+	log.Printf("✓ Public URL: http://%s.localhost:8443", clientID)
 
 	// Create mutex for encoder (only one goroutine can encode at a time)
 	var encoderMu sync.Mutex
@@ -273,7 +305,7 @@ func handleTunnelCommand(args []string, verboseLog *log.Logger) {
 				// Handle request concurrently
 				go func(r protocol.TunnelRequest) {
 					// Proxy request to local application
-					resp := proxyToLocal(&r, *localPort)
+					resp := proxyToLocal(&r, *applicationNetwork, *applicationPort)
 
 					// Preserve RequestID in response
 					resp.RequestID = r.RequestID
@@ -304,9 +336,9 @@ func handleTunnelCommand(args []string, verboseLog *log.Logger) {
 	log.Println("Client shutdown complete")
 }
 
-func proxyToLocal(tunnelReq *protocol.TunnelRequest, localPort int) *protocol.TunnelResponse {
+func proxyToLocal(tunnelReq *protocol.TunnelRequest, applicationNetwork string, applicationPort int) *protocol.TunnelResponse {
 	// Build local URL
-	localURL := fmt.Sprintf("http://localhost:%d%s", localPort, tunnelReq.URL)
+	localURL := fmt.Sprintf("http://%s:%d%s", applicationNetwork, applicationPort, tunnelReq.URL)
 
 	// Create HTTP request
 	req, err := http.NewRequest(tunnelReq.Method, localURL, bytes.NewReader(tunnelReq.Body))
@@ -336,7 +368,7 @@ func proxyToLocal(tunnelReq *protocol.TunnelRequest, localPort int) *protocol.Tu
 		return &protocol.TunnelResponse{
 			StatusCode: http.StatusBadGateway,
 			Headers:    make(http.Header),
-			Body:       []byte(fmt.Sprintf("Error connecting to local app on port %d: %v", localPort, err)),
+			Body:       []byte(fmt.Sprintf("Error connecting to local app on port %d: %v", applicationPort, err)),
 		}
 	}
 	defer resp.Body.Close()

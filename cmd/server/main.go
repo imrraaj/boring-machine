@@ -5,11 +5,13 @@ import (
 	"boring-machine/internal/database"
 	"boring-machine/internal/html"
 	"boring-machine/internal/logger"
+	"boring-machine/internal/metrics"
 	"boring-machine/internal/protocol"
 	"boring-machine/internal/wsio"
 	"context"
 	"crypto/rand"
 	"encoding/gob"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -45,13 +47,15 @@ var upgrader = websocket.Upgrader{
 }
 
 var (
-	httpPort      = flag.String("http_port", ":8443", "HTTPS port for customer-facing server")
+	httpPort      = flag.String("http_port", ":8443", "Port for customer-facing server (HTTP or HTTPS depending on cert-file/key-file flags)")
 	readTimeout   = flag.Duration("read_timeout", 10*time.Second, "HTTP read timeout")
 	writeTimeout  = flag.Duration("write_timeout", 10*time.Second, "HTTP write timeout")
 	tunnelTimeout = flag.Duration("tunnel_timeout", 30*time.Second, "Timeout for tunnel requests")
 	dbConnString  = flag.String("db_url", "", "PostgreSQL connection string")
 	skipAuth      = flag.Bool("skip-auth", false, "Skip authentication (development/benchmark mode only)")
 	verbose       = flag.Bool("verbose", false, "Enable verbose/debug logging")
+	certFile      = flag.String("cert-file", "", "Path to TLS certificate file (enables HTTPS/WSS)")
+	keyFile       = flag.String("key-file", "", "Path to TLS private key file (enables HTTPS/WSS)")
 )
 
 func main() {
@@ -61,25 +65,35 @@ func main() {
 	// Create verbose logger
 	verboseLog := logger.NewLogger(os.Stdout, *verbose, "")
 
+	// Initialize metrics collection
+	serverMetrics := metrics.NewServerMetrics()
+
+	// Check if both cert and key are provided for TLS
+	useTLS := *certFile != "" && *keyFile != ""
+	serverProtocol := "HTTP"
+	if useTLS {
+		serverProtocol = "HTTPS"
+	}
+
 	var authHandler *auth.Handler
 	var authValidator *auth.Validator
 
 	if *skipAuth {
-		log.Println("⚠️  Running in skip-auth mode (development/benchmark only)")
+		verboseLog.Println("⚠️  Running in skip-auth mode (development/benchmark only)")
 	} else {
 		if *dbConnString == "" {
 			*dbConnString = os.Getenv("DATABASE_URL")
 			if *dbConnString == "" {
-				log.Fatal("Database connection string is required. Set DATABASE_URL environment variable or use -db flag")
+				verboseLog.Fatal("Database connection string is required. Set DATABASE_URL environment variable or use -db flag")
 			}
 		}
 
 		db, err := database.New(context.Background(), *dbConnString)
 		if err != nil {
-			log.Fatalf("Failed to connect to database: %v", err)
+			verboseLog.Fatalf("Failed to connect to database: %v", err)
 		}
 		defer db.Close()
-		log.Println("✓ Connected to database")
+		verboseLog.Println("✓ Connected to database")
 
 		authHandler = auth.NewHandler(db.Queries)
 		authValidator = auth.NewValidator(db.Queries)
@@ -97,12 +111,12 @@ func main() {
 
 	go func() {
 		<-sigChan
-		log.Println("\nReceived shutdown signal, shutting down servers...")
+		verboseLog.Println("\nReceived shutdown signal, shutting down servers...")
 		cancel()
 	}()
 
-	log.Printf("Starting boringMachine server...")
-	log.Printf("HTTPS server will listen on %s", *httpPort)
+	verboseLog.Printf("Starting boringMachine server...")
+	verboseLog.Printf("%s server will listen on %s", serverProtocol, *httpPort)
 
 	mux := http.NewServeMux()
 
@@ -112,17 +126,75 @@ func main() {
 		mux.HandleFunc("/auth/rotate", authHandler.HandleRotate)
 	}
 
+	// Admin dashboard endpoints
+	mux.HandleFunc("/admin/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		html.RenderDashboard(w)
+	})
+
+	mux.HandleFunc("/admin/api/metrics", func(w http.ResponseWriter, r *http.Request) {
+		// Get metrics snapshot
+		snapshot := serverMetrics.GetSnapshot()
+
+		// Get system stats
+		sysStats := metrics.GetSystemStats()
+
+		// Get active client count
+		clientsMx.RLock()
+		activeCount := len(clients)
+		clientsMx.RUnlock()
+
+		// Build client list for response
+		clientsList := make([]map[string]interface{}, 0, len(snapshot.ClientInfo))
+		for _, client := range snapshot.ClientInfo {
+			clientsList = append(clientsList, map[string]interface{}{
+				"client_id":     client.ClientID,
+				"user_id":       client.UserID,
+				"connected_at":  client.ConnectedAt.Format(time.RFC3339),
+				"remote_addr":   client.RemoteAddr,
+				"request_count": client.RequestCount,
+				"last_request_at": func() string {
+					if client.LastRequestAt.IsZero() {
+						return ""
+					}
+					return client.LastRequestAt.Format(time.RFC3339)
+				}(),
+			})
+		}
+
+		// Build response
+		response := map[string]interface{}{
+			"server": map[string]interface{}{
+				"uptime_seconds": time.Since(snapshot.StartTime).Seconds(),
+				"start_time":     snapshot.StartTime.Format(time.RFC3339),
+			},
+			"connections": map[string]interface{}{
+				"active":         activeCount,
+				"total_accepted": snapshot.TotalConnectionsAccepted,
+				"total_closed":   snapshot.TotalConnectionsClosed,
+			},
+			"requests": map[string]interface{}{
+				"forwarded": snapshot.TotalRequestsForwarded,
+				"failed":    snapshot.TotalRequestsFailed,
+			},
+			"clients": clientsList,
+			"system":  sysStats,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	})
+
 	mux.HandleFunc("/tunnel/ws", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("[WS] New WebSocket connection attempt from %s", r.RemoteAddr)
+		verboseLog.Printf("[WS] New WebSocket connection attempt from %s", r.RemoteAddr)
 
 		wsConn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Printf("[WS] Failed to upgrade connection: %v", err)
+			verboseLog.Printf("[WS] Failed to upgrade connection: %v", err)
 			return
 		}
 
-		log.Printf("[WS] Connection upgraded successfully from %s", r.RemoteAddr)
-		go handleClientConnection(wsConn, clients, &clientsMx, authValidator, verboseLog)
+		verboseLog.Printf("[WS] Connection upgraded successfully from %s", r.RemoteAddr)
+		go handleClientConnection(wsConn, clients, &clientsMx, authValidator, verboseLog, serverMetrics)
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +207,8 @@ func main() {
 		clientsMx.RUnlock()
 
 		if client == nil {
-			log.Printf("[HTTP] ✗ Client '%s' not found", clientID)
+			verboseLog.Printf("[HTTP] ✗ Client '%s' not found", clientID)
+			serverMetrics.RequestFailed()
 			html.RenderErrorPage(w, http.StatusNotFound, clientID, "client_not_found", "")
 			return
 		}
@@ -145,7 +218,8 @@ func main() {
 		// Convert HTTP request to tunnel request
 		tunnelReq, err := protocol.ConvertHTTPRequest(r)
 		if err != nil {
-			log.Printf("[TUNNEL] ✗ Error converting request: %v", err)
+			verboseLog.Printf("[TUNNEL] ✗ Error converting request: %v", err)
+			serverMetrics.RequestFailed()
 			html.RenderErrorPage(w, http.StatusInternalServerError, clientID, "tunnel_error", err.Error())
 			return
 		}
@@ -174,7 +248,8 @@ func main() {
 		err = client.encoder.Encode(tunnelReq)
 		client.encoderMu.Unlock()
 		if err != nil {
-			log.Printf("[TUNNEL] ✗ Error sending to client: %v", err)
+			verboseLog.Printf("[TUNNEL] ✗ Error sending to client: %v", err)
+			serverMetrics.RequestFailed()
 			html.RenderErrorPage(w, http.StatusBadGateway, clientID, "tunnel_error", err.Error())
 			return
 		}
@@ -186,14 +261,16 @@ func main() {
 		case tunnelResp = <-respChan:
 			// Got response
 		case <-time.After(*tunnelTimeout):
-			log.Printf("[TUNNEL] ✗ Timeout waiting for response")
+			verboseLog.Printf("[TUNNEL] ✗ Timeout waiting for response")
+			serverMetrics.RequestFailed()
 			html.RenderErrorPage(w, http.StatusGatewayTimeout, clientID, "timeout", "")
 			return
 		}
 
 		// Check if this is an application down error
 		if html.IsApplicationDownError(tunnelResp.StatusCode, tunnelResp.Body) {
-			log.Printf("[TUNNEL] ✗ Application not responding")
+			verboseLog.Printf("[TUNNEL] ✗ Application not responding")
+			serverMetrics.RequestFailed()
 			html.RenderErrorPage(w, http.StatusBadGateway, clientID, "application_down", string(tunnelResp.Body))
 			return
 		}
@@ -207,6 +284,9 @@ func main() {
 		w.WriteHeader(tunnelResp.StatusCode)
 		w.Write(tunnelResp.Body)
 
+		// Record successful request forwarding
+		serverMetrics.RequestForwarded(clientID)
+
 		verboseLog.Printf("[TUNNEL] ← Response: %d %s (%d bytes)", tunnelResp.StatusCode, http.StatusText(tunnelResp.StatusCode), len(tunnelResp.Body))
 	})
 
@@ -218,36 +298,41 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("✓ HTTPS server listening on %s", *httpPort)
-		err := customerFacingServer.ListenAndServe()
+		verboseLog.Printf("✓ %s server listening on %s", serverProtocol, *httpPort)
+		var err error
+		if useTLS {
+			err = customerFacingServer.ListenAndServeTLS(*certFile, *keyFile)
+		} else {
+			err = customerFacingServer.ListenAndServe()
+		}
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTPS server error: %v", err)
+			verboseLog.Fatalf("%s server error: %v", serverProtocol, err)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Println("Shutting down servers...")
+	verboseLog.Println("Shutting down servers...")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	if err := customerFacingServer.Shutdown(shutdownCtx); err != nil {
-		log.Printf("HTTPS server shutdown error: %v", err)
+		verboseLog.Printf("HTTPS server shutdown error: %v", err)
 	}
 
 	clientsMx.Lock()
 	for id, client := range clients {
-		log.Printf("[CLIENT] Closing connection to %s", id)
+		verboseLog.Printf("[CLIENT] Closing connection to %s", id)
 		client.conn.Close()
 	}
 	clientsMx.Unlock()
 
-	log.Println("Server shutdown complete")
+	verboseLog.Println("Server shutdown complete")
 }
 
-func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn, clientsMx *sync.RWMutex, validator *auth.Validator, verboseLog *log.Logger) {
+func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn, clientsMx *sync.RWMutex, validator *auth.Validator, verboseLog *log.Logger, serverMetrics *metrics.ServerMetrics) {
 	defer conn.Close()
 
-	log.Printf("[WS] New connection from %s", conn.RemoteAddr())
+	verboseLog.Printf("[WS] New connection from %s", conn.RemoteAddr())
 
 	wsrw := wsio.New(conn)
 	encoder := gob.NewEncoder(wsrw)
@@ -256,18 +341,18 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 	var reg protocol.ClientRegister
 	err := decoder.Decode(&reg)
 	if err != nil {
-		log.Printf("[WS] ✗ Error reading registration from %s: %v", conn.RemoteAddr(), err)
+		verboseLog.Printf("[WS] ✗ Error reading registration from %s: %v", conn.RemoteAddr(), err)
 		return
 	}
 
 	var userID int64
 	if *skipAuth {
-		log.Printf("[WS] Authentication skipped (development mode)")
+		verboseLog.Printf("[WS] Authentication skipped (development mode)")
 		userID = 0
 	} else {
 		userID, err = validator.ValidateToken(context.Background(), reg.Token)
 		if err != nil {
-			log.Printf("[WS] ✗ Invalid token from %s: %v", conn.RemoteAddr(), err)
+			verboseLog.Printf("[WS] ✗ Invalid token from %s: %v", conn.RemoteAddr(), err)
 			encoder.Encode(protocol.RegistrationResponse{
 				Success: false,
 				Error:   fmt.Sprintf("Authentication failed: %v", err),
@@ -306,15 +391,18 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 		Error:    "",
 	})
 	if err != nil {
-		log.Printf("[WS] ✗ Failed to send registration response: %v", err)
+		verboseLog.Printf("[WS] ✗ Failed to send registration response: %v", err)
 		clientsMx.Lock()
 		delete(clients, clientID)
 		clientsMx.Unlock()
 		return
 	}
 
-	log.Printf("[WS] ✓ Client registered: %s (user: %d) from %s", clientID, userID, conn.RemoteAddr())
-	log.Printf("[WS] Active clients: %d", activeClients)
+	verboseLog.Printf("[WS] ✓ Client registered: %s (user: %d) from %s", clientID, userID, conn.RemoteAddr())
+	verboseLog.Printf("[WS] Active clients: %d", activeClients)
+
+	// Record client connection in metrics
+	serverMetrics.ClientConnected(clientID, userID, conn.RemoteAddr().String())
 
 	go handleWebSocketPing(pingCtx, conn, clientID, verboseLog)
 
@@ -324,7 +412,11 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 		delete(clients, clientID)
 		activeClients := len(clients)
 		clientsMx.Unlock()
-		log.Printf("[WS] ✗ Client disconnected: %s (active: %d)", clientID, activeClients)
+
+		// Record client disconnection in metrics
+		serverMetrics.ClientDisconnected(clientID)
+
+		verboseLog.Printf("[WS] ✗ Client disconnected: %s (active: %d)", clientID, activeClients)
 	}()
 
 	// Start goroutine to continuously read responses and route them
@@ -337,7 +429,7 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 		clientConn.decoderMu.Unlock()
 
 		if err != nil {
-			log.Printf("[CLIENT] ✗ Error reading response from %s: %v", clientID, err)
+			verboseLog.Printf("[CLIENT] ✗ Error reading response from %s: %v", clientID, err)
 			return
 		}
 
@@ -352,7 +444,7 @@ func handleClientConnection(conn *websocket.Conn, clients map[string]*ClientConn
 			verboseLog.Printf("[CLIENT] Routing response %s to waiting handler", tunnelResp.RequestID)
 			respChan <- &tunnelResp
 		} else {
-			log.Printf("[CLIENT] ✗ No pending request found for ID %s", tunnelResp.RequestID)
+			verboseLog.Printf("[CLIENT] ✗ No pending request found for ID %s", tunnelResp.RequestID)
 		}
 	}
 }
@@ -387,7 +479,7 @@ func handleWebSocketPing(ctx context.Context, conn *websocket.Conn, clientID str
 			verboseLog.Printf("[WS-PING] Sending ping to %s", clientID)
 			err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add((3/2)*pingTime))
 			if err != nil {
-				log.Printf("[WS-PING] Failed to send ping to %s: %v", clientID, err)
+				verboseLog.Printf("[WS-PING] Failed to send ping to %s: %v", clientID, err)
 				return
 			}
 		}
