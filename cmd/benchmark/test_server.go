@@ -290,6 +290,6 @@ func (ts *TestServer) handleSlow(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	server := NewTestServer(6356, 50)
+	server := NewTestServer(5664, 50)
 	server.Start()
 }

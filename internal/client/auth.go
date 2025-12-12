@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"bytes"
@@ -10,10 +10,6 @@ import (
 	"time"
 
 	"golang.org/x/term"
-)
-
-const (
-	ServerURL = "http://localhost:8443" // Baked into executable
 )
 
 type LoginRequest struct {
@@ -32,7 +28,7 @@ type ErrorResponse struct {
 }
 
 // Login authenticates the user and stores the token
-func Login(username, password string) error {
+func Login(serverURL, username, password string) error {
 	// Create request
 	reqBody, err := json.Marshal(LoginRequest{
 		Username: username,
@@ -43,7 +39,7 @@ func Login(username, password string) error {
 	}
 
 	// Send request
-	resp, err := http.Post(ServerURL+"/auth/login", "application/json", bytes.NewReader(reqBody))
+	resp, err := http.Post(serverURL+"/auth/login", "application/json", bytes.NewReader(reqBody))
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
@@ -80,7 +76,7 @@ func Login(username, password string) error {
 }
 
 // Register creates a new user account and stores the token
-func Register(username, email, password string) error {
+func Register(serverURL, username, email, password string) error {
 	// Create request
 	reqBody, err := json.Marshal(map[string]string{
 		"username": username,
@@ -92,7 +88,7 @@ func Register(username, email, password string) error {
 	}
 
 	// Send request
-	resp, err := http.Post(ServerURL+"/auth/register", "application/json", bytes.NewReader(reqBody))
+	resp, err := http.Post(serverURL+"/auth/register", "application/json", bytes.NewReader(reqBody))
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
@@ -129,7 +125,7 @@ func Register(username, email, password string) error {
 }
 
 // RotateToken rotates the current token
-func RotateToken() error {
+func RotateToken(serverURL string) error {
 	// Load current credentials
 	creds, err := LoadCredentials()
 	if err != nil {
@@ -143,7 +139,7 @@ func RotateToken() error {
 	}
 
 	// Send request
-	resp, err := http.Post(ServerURL+"/auth/rotate", "application/json", bytes.NewReader(reqBody))
+	resp, err := http.Post(serverURL+"/auth/rotate", "application/json", bytes.NewReader(reqBody))
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
