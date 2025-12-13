@@ -12,12 +12,7 @@ import (
 	"golang.org/x/term"
 )
 
-type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-type TokenResponse struct {
+type tokenResponse struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
 	Username  string    `json:"username"`
@@ -27,21 +22,11 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-// Login authenticates the user and stores the token
-func Login(serverURL, username, password string) error {
-	// Create request
-	reqBody, err := json.Marshal(LoginRequest{
-		Username: username,
-		Password: password,
-	})
+func RequestToken(url string, body io.Reader) (tokenResponse, error) {
+	var tokenResp tokenResponse
+	resp, err := http.Post(url, "application/json", body)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Send request
-	resp, err := http.Post(serverURL+"/auth/login", "application/json", bytes.NewReader(reqBody))
-	if err != nil {
-		return fmt.Errorf("failed to connect to server: %w", err)
+		return tokenResp, fmt.Errorf("failed to connect to server: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -49,18 +34,15 @@ func Login(serverURL, username, password string) error {
 		body, _ := io.ReadAll(resp.Body)
 		var errResp ErrorResponse
 		if json.Unmarshal(body, &errResp) == nil {
-			return fmt.Errorf("login failed: %s", errResp.Error)
+			return tokenResp, fmt.Errorf("%s", errResp.Error)
 		}
-		return fmt.Errorf("login failed: %s", string(body))
+		return tokenResp, fmt.Errorf("request failed: %s", string(body))
 	}
 
-	// Parse response
-	var tokenResp TokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
+		return tokenResp, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	// Save credentials
 	creds := &Credentials{
 		Token:     tokenResp.Token,
 		Username:  tokenResp.Username,
@@ -68,16 +50,30 @@ func Login(serverURL, username, password string) error {
 	}
 
 	if err := SaveCredentials(creds); err != nil {
-		return fmt.Errorf("failed to save credentials: %w", err)
+		return tokenResp, fmt.Errorf("failed to save credentials: %w", err)
+	}
+
+	return tokenResp, nil
+}
+
+func Login(url, username, password string) error {
+	reqBody, err := json.Marshal(map[string]string{
+		"username": username,
+		"password": password,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	tokenResp, err := RequestToken(fmt.Sprintf("%s/auth/login", url), bytes.NewReader(reqBody))
+	if err != nil {
+		return err
 	}
 
 	fmt.Printf("Login successful! Token expires at: %s\n", tokenResp.ExpiresAt.Format(time.RFC3339))
 	return nil
 }
 
-// Register creates a new user account and stores the token
 func Register(serverURL, username, email, password string) error {
-	// Create request
 	reqBody, err := json.Marshal(map[string]string{
 		"username": username,
 		"email":    email,
@@ -87,95 +83,35 @@ func Register(serverURL, username, email, password string) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Send request
-	resp, err := http.Post(serverURL+"/auth/register", "application/json", bytes.NewReader(reqBody))
+	tokenResp, err := RequestToken(fmt.Sprintf("%s/auth/register", serverURL), bytes.NewReader(reqBody))
 	if err != nil {
-		return fmt.Errorf("failed to connect to server: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		var errResp ErrorResponse
-		if json.Unmarshal(body, &errResp) == nil {
-			return fmt.Errorf("registration failed: %s", errResp.Error)
-		}
-		return fmt.Errorf("registration failed: %s", string(body))
-	}
-
-	// Parse response
-	var tokenResp TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	// Save credentials
-	creds := &Credentials{
-		Token:     tokenResp.Token,
-		Username:  tokenResp.Username,
-		ExpiresAt: tokenResp.ExpiresAt,
-	}
-
-	if err := SaveCredentials(creds); err != nil {
-		return fmt.Errorf("failed to save credentials: %w", err)
+		return err
 	}
 
 	fmt.Printf("Registration successful! Token expires at: %s\n", tokenResp.ExpiresAt.Format(time.RFC3339))
 	return nil
 }
 
-// RotateToken rotates the current token
 func RotateToken(serverURL string) error {
-	// Load current credentials
 	creds, err := LoadCredentials()
 	if err != nil {
 		return fmt.Errorf("failed to load credentials: %w", err)
 	}
 
-	// Create request
 	reqBody, err := json.Marshal(map[string]string{"token": creds.Token})
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Send request
-	resp, err := http.Post(serverURL+"/auth/rotate", "application/json", bytes.NewReader(reqBody))
+	tokenResp, err := RequestToken(fmt.Sprintf("%s/auth/rotate", serverURL), bytes.NewReader(reqBody))
 	if err != nil {
-		return fmt.Errorf("failed to connect to server: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		var errResp ErrorResponse
-		if json.Unmarshal(body, &errResp) == nil {
-			return fmt.Errorf("rotation failed: %s", errResp.Error)
-		}
-		return fmt.Errorf("rotation failed: %s", string(body))
-	}
-
-	// Parse response
-	var tokenResp TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	// Save new credentials
-	newCreds := &Credentials{
-		Token:     tokenResp.Token,
-		Username:  tokenResp.Username,
-		ExpiresAt: tokenResp.ExpiresAt,
-	}
-
-	if err := SaveCredentials(newCreds); err != nil {
-		return fmt.Errorf("failed to save credentials: %w", err)
+		return err
 	}
 
 	fmt.Printf("Token rotated successfully! New token expires at: %s\n", tokenResp.ExpiresAt.Format(time.RFC3339))
 	return nil
 }
 
-// ReadPassword prompts for password without echoing
 func ReadPassword(prompt string) (string, error) {
 	fmt.Print(prompt)
 	password, err := term.ReadPassword(int(syscall.Stdin))

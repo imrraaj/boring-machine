@@ -12,7 +12,6 @@ import (
 	"boring-machine/internal/client"
 )
 
-// handleAuthCommand routes auth subcommands
 func handleAuthCommand(args []string) {
 	authFlags := flag.NewFlagSet("auth", flag.ExitOnError)
 	serverURL := authFlags.String("server", "http://localhost:8443", "Authentication server URL")
@@ -39,7 +38,6 @@ func handleAuthCommand(args []string) {
 	}
 }
 
-// handleLogin processes the login command
 func handleLogin(args []string, serverURL string) {
 	fmt.Print("Username: ")
 	var username string
@@ -55,7 +53,6 @@ func handleLogin(args []string, serverURL string) {
 	}
 }
 
-// handleRegister processes the register command
 func handleRegister(args []string, serverURL string) {
 	fmt.Print("Username: ")
 	var username string
@@ -75,14 +72,12 @@ func handleRegister(args []string, serverURL string) {
 	}
 }
 
-// handleRotate processes the rotate command
 func handleRotate(args []string, serverURL string) {
 	if err := client.RotateToken(serverURL); err != nil {
 		log.Fatalf("Token rotation failed: %v", err)
 	}
 }
 
-// handleTunnelCommand processes the tunnel command
 func handleTunnelCommand(args []string, verbose bool) {
 	tunnelFlags := flag.NewFlagSet("tunnel", flag.ExitOnError)
 	applicationNetwork := tunnelFlags.String("network", "127.0.0.1", "Local application network address")
@@ -93,8 +88,7 @@ func handleTunnelCommand(args []string, verbose bool) {
 	token := tunnelFlags.String("token", "", "Authentication token (overrides credentials file)")
 	tunnelFlags.Parse(args)
 
-	// Build client configuration
-	config := client.Config{
+	config := client.ClientConfig{
 		ServerAddr:         *serverAddr,
 		ApplicationNetwork: *applicationNetwork,
 		ApplicationPort:    *applicationPort,
@@ -103,7 +97,6 @@ func handleTunnelCommand(args []string, verbose bool) {
 		Verbose:            verbose,
 	}
 
-	// Load or create credentials
 	var creds *client.Credentials
 	var err error
 
@@ -114,7 +107,6 @@ func handleTunnelCommand(args []string, verbose bool) {
 			Token:    "benchmark-token",
 		}
 	} else {
-		// If token flag is explicitly provided, use it
 		if *token != "" {
 			log.Println("Using token from --token flag")
 			creds = &client.Credentials{
@@ -122,7 +114,6 @@ func handleTunnelCommand(args []string, verbose bool) {
 				Token:    *token,
 			}
 		} else {
-			// Otherwise, load credentials from file
 			creds, err = client.LoadCredentials()
 			if err != nil {
 				log.Fatalf("Failed to load credentials: %v", err)
@@ -131,10 +122,7 @@ func handleTunnelCommand(args []string, verbose bool) {
 		}
 	}
 
-	// Create client
 	c := client.NewClient(config, *creds)
-
-	// Setup graceful shutdown
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -147,13 +135,11 @@ func handleTunnelCommand(args []string, verbose bool) {
 		cancel()
 	}()
 
-	// Connect to server
 	if err := c.Connect(); err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
 	defer c.Shutdown()
 
-	// Run tunnel
 	if err := c.Run(); err != nil {
 		log.Fatalf("Tunnel error: %v", err)
 	}

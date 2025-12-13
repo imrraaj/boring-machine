@@ -5,25 +5,16 @@ import (
 	"fmt"
 )
 
-// Config holds all configuration for the client
-type Config struct {
-	// Server connection
-	ServerAddr string
-
-	// Local application
+type ClientConfig struct {
+	ServerAddr         string
 	ApplicationNetwork string
 	ApplicationPort    int
-
-	// Security
-	SkipAuth bool
-	Secure   bool
-
-	// Logging
-	Verbose bool
+	SkipAuth           bool
+	Secure             bool
+	Verbose            bool
 }
 
-// Validate checks if the configuration is valid
-func (c *Config) Validate() error {
+func (c *ClientConfig) Validate() error {
 	if c.ServerAddr == "" {
 		return errors.New("server address is required")
 	}
@@ -38,15 +29,23 @@ func (c *Config) Validate() error {
 
 	return nil
 }
+func (c *ClientConfig) UseTLS() bool {
+	return !c.SkipAuth
+}
 
-// DefaultConfig returns a configuration with sensible defaults
-func DefaultConfig() Config {
-	return Config{
+func (c *ClientConfig) Protocol() string {
+	if c.UseTLS() {
+		return "WSS"
+	}
+	return "WS"
+}
+func DefaultConfig() ClientConfig {
+	return ClientConfig{
 		ServerAddr:         "localhost:8443",
 		ApplicationNetwork: "127.0.0.1",
 		ApplicationPort:    3000,
-		SkipAuth:          false,
-		Secure:            false,
-		Verbose:           false,
+		SkipAuth:           false,
+		Secure:             false,
+		Verbose:            false,
 	}
 }

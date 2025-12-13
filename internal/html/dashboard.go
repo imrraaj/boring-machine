@@ -9,7 +9,7 @@ import (
 var dashboardHTML []byte
 
 // RenderDashboard serves the admin dashboard HTML page
-func RenderDashboard(w http.ResponseWriter) {
+func RenderDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write(dashboardHTML)

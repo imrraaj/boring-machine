@@ -3,9 +3,53 @@ package protocol
 import (
 	"io"
 	"net/http"
+	"sync"
+
+	"github.com/gorilla/websocket"
 )
 
-// ClientRegister is sent by the client when it first connects to register itself
+type WebSocketReadWriter struct {
+	conn   *websocket.Conn
+	reader io.Reader
+	mu     sync.Mutex
+}
+
+func NewWebSocketReadWriter(conn *websocket.Conn) *WebSocketReadWriter {
+	return &WebSocketReadWriter{
+		conn: conn,
+	}
+}
+
+func (w *WebSocketReadWriter) Read(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.reader != nil {
+		n, err = w.reader.Read(p)
+		if err != io.EOF {
+			return n, err
+		}
+		w.reader = nil
+	}
+
+	_, w.reader, err = w.conn.NextReader()
+	if err != nil {
+		return 0, err
+	}
+
+	return w.reader.Read(p)
+}
+
+func (w *WebSocketReadWriter) Write(p []byte) (n int, err error) {
+	writer, err := w.conn.NextWriter(websocket.BinaryMessage)
+	if err != nil {
+		return 0, err
+	}
+	defer writer.Close()
+
+	return writer.Write(p)
+}
+
 type ClientRegister struct {
 	Token string
 }

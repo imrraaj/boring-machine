@@ -5,37 +5,8 @@ import (
 	"time"
 )
 
-// ServerMetrics tracks server-wide metrics
 type ServerMetrics struct {
-	mu sync.RWMutex
-
-	// Server uptime
-	StartTime time.Time
-
-	// Connection metrics
-	TotalConnectionsAccepted int64
-	TotalConnectionsClosed   int64
-
-	// Request metrics
-	TotalRequestsForwarded int64
-	TotalRequestsFailed    int64
-
-	// Client metadata
-	ClientInfo map[string]*ClientMetadata
-}
-
-// ClientMetadata stores per-client metrics
-type ClientMetadata struct {
-	ClientID      string
-	UserID        int64
-	ConnectedAt   time.Time
-	RemoteAddr    string
-	RequestCount  int64
-	LastRequestAt time.Time
-}
-
-// MetricsSnapshot is a thread-safe snapshot of current metrics
-type MetricsSnapshot struct {
+	mu                       sync.RWMutex
 	StartTime                time.Time
 	TotalConnectionsAccepted int64
 	TotalConnectionsClosed   int64
@@ -44,15 +15,24 @@ type MetricsSnapshot struct {
 	ClientInfo               map[string]*ClientMetadata
 }
 
-// NewServerMetrics creates a new ServerMetrics instance
+type ClientMetadata struct {
+	ClientID      string
+	UserID        int64
+	ConnectedAt   time.Time
+	RemoteAddr    string
+	RequestCount  int64
+	LastRequestAt time.Time
+	ResponseBytes int64
+}
+
 func NewServerMetrics() *ServerMetrics {
 	return &ServerMetrics{
 		StartTime:  time.Now(),
+		mu:         sync.RWMutex{},
 		ClientInfo: make(map[string]*ClientMetadata),
 	}
 }
 
-// ClientConnected records a new client connection
 func (m *ServerMetrics) ClientConnected(clientID string, userID int64, remoteAddr string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -66,7 +46,6 @@ func (m *ServerMetrics) ClientConnected(clientID string, userID int64, remoteAdd
 	}
 }
 
-// ClientDisconnected records a client disconnection
 func (m *ServerMetrics) ClientDisconnected(clientID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -75,8 +54,7 @@ func (m *ServerMetrics) ClientDisconnected(clientID string) {
 	delete(m.ClientInfo, clientID)
 }
 
-// RequestForwarded increments the forwarded request counter for a client
-func (m *ServerMetrics) RequestForwarded(clientID string) {
+func (m *ServerMetrics) RequestForwarded(clientID string, responseSize int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -85,10 +63,10 @@ func (m *ServerMetrics) RequestForwarded(clientID string) {
 	if client, exists := m.ClientInfo[clientID]; exists {
 		client.RequestCount++
 		client.LastRequestAt = time.Now()
+		client.ResponseBytes += int64(responseSize)
 	}
 }
 
-// RequestFailed increments the failed request counter
 func (m *ServerMetrics) RequestFailed() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -96,19 +74,18 @@ func (m *ServerMetrics) RequestFailed() {
 	m.TotalRequestsFailed++
 }
 
-// GetSnapshot returns a thread-safe snapshot of current metrics
-func (m *ServerMetrics) GetSnapshot() MetricsSnapshot {
+func (m *ServerMetrics) GetSnapshot() ServerMetrics {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	// Deep copy client info
 	clientInfoCopy := make(map[string]*ClientMetadata, len(m.ClientInfo))
 	for k, v := range m.ClientInfo {
-		clientCopy := *v // Copy value
+		clientCopy := *v
 		clientInfoCopy[k] = &clientCopy
 	}
 
-	return MetricsSnapshot{
+	return ServerMetrics{
 		StartTime:                m.StartTime,
 		TotalConnectionsAccepted: m.TotalConnectionsAccepted,
 		TotalConnectionsClosed:   m.TotalConnectionsClosed,
