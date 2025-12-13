@@ -1,21 +1,21 @@
 -- name: CreateToken :one
 INSERT INTO auth_tokens (user_id, token, expires_at)
-VALUES ($1, $2, $3)
+VALUES (?, ?, ?)
 RETURNING *;
 
 -- name: GetTokenByValue :one
 SELECT * FROM auth_tokens
-WHERE token = $1 LIMIT 1;
+WHERE token = ? LIMIT 1;
 
 -- name: UpdateLastUsed :exec
 UPDATE auth_tokens
-SET last_used_at = NOW()
-WHERE id = $1;
+SET last_used_at = datetime('now')
+WHERE id = ?;
 
 -- name: DeleteToken :exec
 DELETE FROM auth_tokens
-WHERE id = $1;
+WHERE id = ?;
 
 -- name: DeleteExpiredTokens :execrows
 DELETE FROM auth_tokens
-WHERE expires_at < NOW();
+WHERE expires_at < datetime('now');

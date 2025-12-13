@@ -10,7 +10,7 @@ type ServerConfig struct {
 	ReadTimeout   time.Duration
 	WriteTimeout  time.Duration
 	TunnelTimeout time.Duration
-	DBConnString  string
+	DBPath        string
 	SkipAuth      bool
 	Verbose       bool
 	CertFile      string
@@ -32,10 +32,10 @@ func (c *ServerConfig) Validate() error {
 	if c.HTTPPort == "" {
 		return fmt.Errorf("HTTP port is required")
 	}
-	if !c.SkipAuth && c.DBConnString == "" {
-		return fmt.Errorf("database connection string is required when auth is enabled")
+	if !c.SkipAuth && c.DBPath == "" {
+		return fmt.Errorf("database path is required when auth is enabled")
 	}
-	if c.CertFile == "" || c.KeyFile == "" {
+	if (c.CertFile == "" && c.KeyFile != "") || (c.CertFile != "" && c.KeyFile == "") {
 		return fmt.Errorf("both cert-file and key-file must be provided for TLS")
 	}
 	return nil

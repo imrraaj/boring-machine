@@ -133,12 +133,12 @@ func handleTunnelCommand(args []string, verbose bool) {
 		<-sigChan
 		log.Println("\nReceived shutdown signal, closing connection...")
 		cancel()
+		c.Shutdown()
 	}()
 
 	if err := c.Connect(); err != nil {
 		log.Fatalf("Failed to connect: %v", err)
 	}
-	defer c.Shutdown()
 
 	if err := c.Run(); err != nil {
 		log.Fatalf("Tunnel error: %v", err)

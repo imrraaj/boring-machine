@@ -30,14 +30,14 @@ func (c *ClientConfig) Validate() error {
 	return nil
 }
 func (c *ClientConfig) UseTLS() bool {
-	return !c.SkipAuth
+	return c.Secure
 }
 
 func (c *ClientConfig) Protocol() string {
 	if c.UseTLS() {
-		return "WSS"
+		return "wss"
 	}
-	return "WS"
+	return "ws"
 }
 func DefaultConfig() ClientConfig {
 	return ClientConfig{

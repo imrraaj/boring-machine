@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -166,7 +165,7 @@ func (s *Server) HandleRotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if time.Now().After(authToken.ExpiresAt.Time) {
+	if time.Now().After(authToken.ExpiresAt) {
 		writeError(w, "Token expired", http.StatusUnauthorized)
 		return
 	}
@@ -204,7 +203,7 @@ func (s *Server) generateToken(ctx context.Context, userID int64) (string, time.
 	_, err := s.db.Queries.CreateToken(ctx, sqlc.CreateTokenParams{
 		UserID:    userID,
 		Token:     tokenStr,
-		ExpiresAt: pgtype.Timestamp{Time: expiresAt, Valid: true},
+		ExpiresAt: expiresAt,
 	})
 	if err != nil {
 		return "", time.Time{}, err
@@ -219,7 +218,7 @@ func (s *Server) ValidateToken(ctx context.Context, tokenStr string) (int64, err
 		return 0, fmt.Errorf("invalid token")
 	}
 
-	if time.Now().After(token.ExpiresAt.Time) {
+	if time.Now().After(token.ExpiresAt) {
 		return 0, fmt.Errorf("token expired")
 	}
 

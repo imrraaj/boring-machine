@@ -16,7 +16,7 @@ var (
 	readTimeout   = flag.Duration("read_timeout", 10*time.Second, "HTTP read timeout")
 	writeTimeout  = flag.Duration("write_timeout", 10*time.Second, "HTTP write timeout")
 	tunnelTimeout = flag.Duration("tunnel_timeout", 30*time.Second, "Timeout for tunnel requests")
-	dbConnString  = flag.String("db_url", "", "PostgreSQL connection string")
+	dbPath        = flag.String("db", "", "SQLite database file path (default: boring-machine.db)")
 	skipAuth      = flag.Bool("skip-auth", false, "Skip authentication (development/benchmark mode only)")
 	verbose       = flag.Bool("verbose", false, "Enable verbose/debug logging")
 	certFile      = flag.String("cert-file", "", "Path to TLS certificate file (enables HTTPS/WSS)")
@@ -27,8 +27,11 @@ func main() {
 	LoadEnv()
 	flag.Parse()
 
-	if *dbConnString == "" && !*skipAuth {
-		*dbConnString = os.Getenv("DATABASE_URL")
+	if *dbPath == "" && !*skipAuth {
+		*dbPath = os.Getenv("DATABASE_PATH")
+		if *dbPath == "" {
+			*dbPath = "boring-machine.db"
+		}
 	}
 
 	config := server.ServerConfig{
@@ -36,7 +39,7 @@ func main() {
 		ReadTimeout:   *readTimeout,
 		WriteTimeout:  *writeTimeout,
 		TunnelTimeout: *tunnelTimeout,
-		DBConnString:  *dbConnString,
+		DBPath:        *dbPath,
 		SkipAuth:      *skipAuth,
 		Verbose:       *verbose,
 		CertFile:      *certFile,
@@ -47,7 +50,7 @@ func main() {
 	var err error
 
 	if !*skipAuth {
-		db, err = database.New(context.Background(), config.DBConnString)
+		db, err = database.New(context.Background(), config.DBPath)
 		if err != nil {
 			panic(err)
 		}

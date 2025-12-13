@@ -3,3 +3,4 @@ client/certs
 bin/
 .env
 certs/
+*.db

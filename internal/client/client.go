@@ -85,8 +85,7 @@ func (c *Client) Context() context.Context {
 func (c *Client) dialWebSocket() error {
 	wsProtocol := c.config.Protocol()
 	wsURL := fmt.Sprintf("%s://%s/tunnel/ws", wsProtocol, c.config.ServerAddr)
-
-	c.logger.Printf("[%s] Attempting to connect via %s...", wsProtocol, wsURL)
+	log.Printf("[%s] Attempting to connect via %s...", wsProtocol, wsURL)
 
 	dialer := websocket.Dialer{
 		TLSClientConfig: &tls.Config{

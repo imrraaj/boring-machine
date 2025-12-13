@@ -5,23 +5,24 @@
 package sqlc
 
 import (
-	"github.com/jackc/pgx/v5/pgtype"
+	"database/sql"
+	"time"
 )
 
 type AuthToken struct {
-	ID         int64            `json:"id"`
-	UserID     int64            `json:"user_id"`
-	Token      string           `json:"token"`
-	CreatedAt  pgtype.Timestamp `json:"created_at"`
-	ExpiresAt  pgtype.Timestamp `json:"expires_at"`
-	LastUsedAt pgtype.Timestamp `json:"last_used_at"`
+	ID         int64        `json:"id"`
+	UserID     int64        `json:"user_id"`
+	Token      string       `json:"token"`
+	CreatedAt  time.Time    `json:"created_at"`
+	ExpiresAt  time.Time    `json:"expires_at"`
+	LastUsedAt sql.NullTime `json:"last_used_at"`
 }
 
 type User struct {
-	ID           int64            `json:"id"`
-	Username     string           `json:"username"`
-	Email        string           `json:"email"`
-	PasswordHash string           `json:"password_hash"`
-	CreatedAt    pgtype.Timestamp `json:"created_at"`
-	UpdatedAt    pgtype.Timestamp `json:"updated_at"`
+	ID           int64     `json:"id"`
+	Username     string    `json:"username"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"password_hash"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }

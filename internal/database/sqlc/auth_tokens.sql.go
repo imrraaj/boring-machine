@@ -7,24 +7,23 @@ package sqlc
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
+	"time"
 )
 
 const createToken = `-- name: CreateToken :one
 INSERT INTO auth_tokens (user_id, token, expires_at)
-VALUES ($1, $2, $3)
+VALUES (?, ?, ?)
 RETURNING id, user_id, token, created_at, expires_at, last_used_at
 `
 
 type CreateTokenParams struct {
-	UserID    int64            `json:"user_id"`
-	Token     string           `json:"token"`
-	ExpiresAt pgtype.Timestamp `json:"expires_at"`
+	UserID    int64     `json:"user_id"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 func (q *Queries) CreateToken(ctx context.Context, arg CreateTokenParams) (AuthToken, error) {
-	row := q.db.QueryRow(ctx, createToken, arg.UserID, arg.Token, arg.ExpiresAt)
+	row := q.db.QueryRowContext(ctx, createToken, arg.UserID, arg.Token, arg.ExpiresAt)
 	var i AuthToken
 	err := row.Scan(
 		&i.ID,
@@ -39,34 +38,34 @@ func (q *Queries) CreateToken(ctx context.Context, arg CreateTokenParams) (AuthT
 
 const deleteExpiredTokens = `-- name: DeleteExpiredTokens :execrows
 DELETE FROM auth_tokens
-WHERE expires_at < NOW()
+WHERE expires_at < datetime('now')
 `
 
 func (q *Queries) DeleteExpiredTokens(ctx context.Context) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteExpiredTokens)
+	result, err := q.db.ExecContext(ctx, deleteExpiredTokens)
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected(), nil
+	return result.RowsAffected()
 }
 
 const deleteToken = `-- name: DeleteToken :exec
 DELETE FROM auth_tokens
-WHERE id = $1
+WHERE id = ?
 `
 
 func (q *Queries) DeleteToken(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, deleteToken, id)
+	_, err := q.db.ExecContext(ctx, deleteToken, id)
 	return err
 }
 
 const getTokenByValue = `-- name: GetTokenByValue :one
 SELECT id, user_id, token, created_at, expires_at, last_used_at FROM auth_tokens
-WHERE token = $1 LIMIT 1
+WHERE token = ? LIMIT 1
 `
 
 func (q *Queries) GetTokenByValue(ctx context.Context, token string) (AuthToken, error) {
-	row := q.db.QueryRow(ctx, getTokenByValue, token)
+	row := q.db.QueryRowContext(ctx, getTokenByValue, token)
 	var i AuthToken
 	err := row.Scan(
 		&i.ID,
@@ -81,11 +80,11 @@ func (q *Queries) GetTokenByValue(ctx context.Context, token string) (AuthToken,
 
 const updateLastUsed = `-- name: UpdateLastUsed :exec
 UPDATE auth_tokens
-SET last_used_at = NOW()
-WHERE id = $1
+SET last_used_at = datetime('now')
+WHERE id = ?
 `
 
 func (q *Queries) UpdateLastUsed(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, updateLastUsed, id)
+	_, err := q.db.ExecContext(ctx, updateLastUsed, id)
 	return err
 }
