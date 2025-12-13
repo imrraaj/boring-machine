@@ -2,3 +2,4 @@ server/certs
 client/certs
 bin/
 .env
+certs/
