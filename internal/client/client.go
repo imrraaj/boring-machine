@@ -19,6 +19,26 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+var (
+	errInternalServer = &protocol.TunnelResponse{
+		StatusCode: http.StatusInternalServerError,
+		Headers:    make(http.Header),
+		Body:       []byte("Internal Server Error"),
+	}
+
+	httpClient = &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:          1000,
+			MaxIdleConnsPerHost:   1000,
+			IdleConnTimeout:       120 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
+)
+
 type Client struct {
 	config      ClientConfig
 	credentials Credentials
@@ -39,7 +59,7 @@ func NewClient(config ClientConfig, creds Credentials) *Client {
 		credentials: creds,
 		ctx:         ctx,
 		cancel:      cancel,
-		logger:      logger.NewLogger(os.Stdout, config.Verbose, ""),
+		logger:      logger.NewLogger(os.Stdout, config.Verbose, "[BRC] "),
 	}
 }
 
@@ -91,8 +111,9 @@ func (c *Client) dialWebSocket() error {
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: !c.config.Secure,
 		},
-		ReadBufferSize:  4096,
-		WriteBufferSize: 4096,
+		ReadBufferSize:  32 * 1024,
+		WriteBufferSize: 32 * 1024,
+		WriteBufferPool: &sync.Pool{},
 	}
 
 	conn, resp, err := dialer.Dial(wsURL, nil)
@@ -193,11 +214,7 @@ func (c *Client) proxyToLocal(tunnelReq *protocol.TunnelRequest) *protocol.Tunne
 	req, err := http.NewRequest(tunnelReq.Method, localURL, bytes.NewReader(tunnelReq.Body))
 	if err != nil {
 		c.logger.Printf("✗ Error creating request: %v", err)
-		return &protocol.TunnelResponse{
-			StatusCode: http.StatusInternalServerError,
-			Headers:    make(http.Header),
-			Body:       fmt.Appendf([]byte{}, "Error creating request: %v", err),
-		}
+		return errInternalServer
 	}
 
 	for key, values := range tunnelReq.Headers {
@@ -206,9 +223,6 @@ func (c *Client) proxyToLocal(tunnelReq *protocol.TunnelRequest) *protocol.Tunne
 		}
 	}
 
-	httpClient := &http.Client{
-		Timeout: 10 * time.Second,
-	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		c.logger.Printf("✗ Error connecting to local app: %v", err)
@@ -223,11 +237,7 @@ func (c *Client) proxyToLocal(tunnelReq *protocol.TunnelRequest) *protocol.Tunne
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.logger.Printf("✗ Error reading response: %v", err)
-		return &protocol.TunnelResponse{
-			StatusCode: http.StatusInternalServerError,
-			Headers:    make(http.Header),
-			Body:       fmt.Appendf([]byte{}, "Error reading response: %v", err),
-		}
+		return errInternalServer
 	}
 
 	c.logger.Printf("[DEBUG] Received response: %d %s (%d bytes)", resp.StatusCode, http.StatusText(resp.StatusCode), len(body))

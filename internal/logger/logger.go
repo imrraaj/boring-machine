@@ -5,10 +5,6 @@ import (
 	"log"
 )
 
-// USAGE:
-// 	l := NewLogger(os.Stdout, true, "BoringMachine: ");
-//  l.Println()
-
 func NewLogger(out io.Writer, verbose bool, prefix string) *log.Logger {
 	var instance *log.Logger
 	if verbose {

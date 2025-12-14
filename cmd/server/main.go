@@ -5,6 +5,7 @@ import (
 	"boring-machine/internal/server"
 	"context"
 	"flag"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,11 +13,11 @@ import (
 )
 
 var (
-	httpPort      = flag.String("http_port", ":8443", "Port for customer-facing server")
+	httpPort      = flag.String("port", ":8443", "Port for customer-facing server")
 	readTimeout   = flag.Duration("read_timeout", 10*time.Second, "HTTP read timeout")
 	writeTimeout  = flag.Duration("write_timeout", 10*time.Second, "HTTP write timeout")
 	tunnelTimeout = flag.Duration("tunnel_timeout", 30*time.Second, "Timeout for tunnel requests")
-	dbPath        = flag.String("db", "", "SQLite database file path (default: boring-machine.db)")
+	dbPath        = flag.String("db", "boringmachine.db", "SQLite database file path")
 	skipAuth      = flag.Bool("skip-auth", false, "Skip authentication (development/benchmark mode only)")
 	verbose       = flag.Bool("verbose", false, "Enable verbose/debug logging")
 	certFile      = flag.String("cert-file", "", "Path to TLS certificate file (enables HTTPS/WSS)")
@@ -30,7 +31,7 @@ func main() {
 	if *dbPath == "" && !*skipAuth {
 		*dbPath = os.Getenv("DATABASE_PATH")
 		if *dbPath == "" {
-			*dbPath = "boring-machine.db"
+			*dbPath = "boringmachine.db"
 		}
 	}
 
@@ -52,14 +53,19 @@ func main() {
 	if !*skipAuth {
 		db, err = database.New(context.Background(), config.DBPath)
 		if err != nil {
-			panic(err)
+			log.Fatalf("Failed to initialize database: %v", err)
 		}
 		defer db.Close()
+		log.Println("✅ Database initialized successfully")
+		log.Printf("Database path: %s", config.DBPath)
+	} else {
+		log.Println("⚠️  Running in skip-auth mode (development/benchmark only)")
+		log.Println("⚠️  Authentication is disabled - all connections will be allowed")
 	}
 
 	srv, err := server.NewServer(config, db)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to create server: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -74,7 +80,7 @@ func main() {
 	}()
 
 	if err := srv.Start(); err != nil {
-		panic(err)
+		log.Fatalf("Failed to start server: %v", err)
 	}
 
 	<-ctx.Done()

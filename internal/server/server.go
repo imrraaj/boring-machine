@@ -43,14 +43,15 @@ func NewServer(config ServerConfig, db *database.DB) (*Server, error) {
 		config:  config,
 		clients: make(map[string]*ClientConn),
 		upgrader: websocket.Upgrader{
-			ReadBufferSize:  4096,
-			WriteBufferSize: 4096,
+			ReadBufferSize:  32 * 1024,
+			WriteBufferSize: 32 * 1024,
+			WriteBufferPool: &sync.Pool{},
 			CheckOrigin: func(r *http.Request) bool {
 				return true
 			},
 		},
 		metrics: metrics.NewServerMetrics(),
-		logger:  logger.NewLogger(os.Stdout, config.Verbose, ""),
+		logger:  logger.NewLogger(os.Stdout, config.Verbose, "[BRS] "),
 		ctx:     ctx,
 		cancel:  cancel,
 		db:      db,
@@ -69,11 +70,10 @@ func NewServer(config ServerConfig, db *database.DB) (*Server, error) {
 }
 
 func (s *Server) Start() error {
-	s.logger.Printf("Starting boringMachine server...")
-	s.logger.Printf("%s server will listen on %s", s.config.Protocol(), s.config.HTTPPort)
+	log.Printf("Starting boring-machine server...")
 
 	go func() {
-		s.logger.Printf("✓ %s server listening on %s", s.config.Protocol(), s.config.HTTPPort)
+		log.Printf("✓ %s server listening on %s", s.config.Protocol(), s.config.HTTPPort)
 		var err error
 		if s.config.UseTLS() {
 			err = s.httpServer.ListenAndServeTLS(s.config.CertFile, s.config.KeyFile)
@@ -81,7 +81,7 @@ func (s *Server) Start() error {
 			err = s.httpServer.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
-			s.logger.Fatalf("%s server error: %v", s.config.Protocol(), err)
+			log.Fatalf("%s server error: %v", s.config.Protocol(), err)
 		}
 	}()
 
@@ -89,22 +89,21 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) Shutdown() error {
-	s.logger.Println("Shutting down servers...")
+	log.Println("Shutting down servers...")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
-		s.logger.Printf("HTTP server shutdown error: %v", err)
+		log.Printf("HTTP server shutdown error: %v", err)
 	}
 
 	s.clientsMx.Lock()
-	for id, client := range s.clients {
-		s.logger.Printf("[CLIENT] Closing connection to %s", id)
+	for _, client := range s.clients {
 		client.conn.Close()
 	}
 	s.clientsMx.Unlock()
 
-	s.logger.Println("Server shutdown complete")
+	log.Println("Server shutdown complete")
 	return nil
 }
 
@@ -113,16 +112,12 @@ func (s *Server) Context() context.Context {
 }
 
 func (s *Server) handleTunnelWebSocket(w http.ResponseWriter, r *http.Request) {
-	s.logger.Printf("[WS] New WebSocket connection attempt from %s", r.RemoteAddr)
-
 	wsConn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.logger.Printf("[WS] Failed to upgrade connection: %v", err)
 		http.Error(w, "WebSocket upgrade failed", http.StatusInternalServerError)
 		return
 	}
-
-	s.logger.Printf("[WS] Connection upgraded successfully from %s", r.RemoteAddr)
 	go s.handleClientConnection(wsConn)
 }
 

@@ -27,55 +27,62 @@ func handleAuthCommand(args []string) {
 
 	switch authCmd {
 	case "login":
-		handleLogin(authArgs[1:], *serverURL)
+		handleLogin(*serverURL)
 	case "register":
-		handleRegister(authArgs[1:], *serverURL)
+		handleRegister(*serverURL)
 	case "rotate":
-		handleRotate(authArgs[1:], *serverURL)
+		handleRotate(*serverURL)
 	default:
 		fmt.Printf("Unknown auth command: %s\n", authCmd)
 		os.Exit(1)
 	}
 }
 
-func handleLogin(args []string, serverURL string) {
-	fmt.Print("Username: ")
+func handleLogin(serverURL string) {
+	fmt.Print("❯Username: ")
 	var username string
 	fmt.Scanln(&username)
 
-	password, err := client.ReadPassword("Password: ")
+	password, err := client.ReadPassword("❯Password: ")
 	if err != nil {
-		log.Fatalf("Failed to read password: %v", err)
+		fmt.Printf("Failed to read password: %v\n", err)
+		return
 	}
 
 	if err := client.Login(serverURL, username, password); err != nil {
-		log.Fatalf("Login failed: %v", err)
+		fmt.Printf("Login failed: %v\n", err)
+		return
 	}
+
 }
 
-func handleRegister(args []string, serverURL string) {
-	fmt.Print("Username: ")
+func handleRegister(serverURL string) {
+	fmt.Print("❯Username: ")
 	var username string
 	fmt.Scanln(&username)
 
-	fmt.Print("Email: ")
+	fmt.Print("❯Email: ")
 	var email string
 	fmt.Scanln(&email)
 
-	password, err := client.ReadPassword("Password: ")
+	password, err := client.ReadPassword("❯Password: ")
 	if err != nil {
-		log.Fatalf("Failed to read password: %v", err)
+		fmt.Printf("Failed to read password: %v\n", err)
+		return
 	}
 
 	if err := client.Register(serverURL, username, email, password); err != nil {
-		log.Fatalf("Registration failed: %v", err)
+		fmt.Printf("Registration failed: %v\n", err)
+		return
 	}
 }
 
-func handleRotate(args []string, serverURL string) {
+func handleRotate(serverURL string) {
 	if err := client.RotateToken(serverURL); err != nil {
-		log.Fatalf("Token rotation failed: %v", err)
+		fmt.Printf("Token rotation failed: %v\n", err)
+		return
 	}
+	fmt.Println("Token rotated successfully!")
 }
 
 func handleTunnelCommand(args []string, verbose bool) {
@@ -103,20 +110,21 @@ func handleTunnelCommand(args []string, verbose bool) {
 	if *skipAuth {
 		log.Println("⚠️  Running in skip-auth mode (development/benchmark only)")
 		creds = &client.Credentials{
-			Username: "benchmark-user",
-			Token:    "benchmark-token",
+			Username: "unknown",
+			Token:    "unknown",
 		}
 	} else {
 		if *token != "" {
 			log.Println("Using token from --token flag")
 			creds = &client.Credentials{
-				Username: "cli-user",
+				Username: "unknown",
 				Token:    *token,
 			}
 		} else {
 			creds, err = client.LoadCredentials()
 			if err != nil {
-				log.Fatalf("Failed to load credentials: %v", err)
+				fmt.Printf("Failed to load credentials: %v\n", err)
+				return
 			}
 			log.Printf("Loaded credentials for user: %s", creds.Username)
 		}
@@ -137,10 +145,12 @@ func handleTunnelCommand(args []string, verbose bool) {
 	}()
 
 	if err := c.Connect(); err != nil {
-		log.Fatalf("Failed to connect: %v", err)
+		fmt.Printf("Failed to connect: %v\n", err)
+		return
 	}
 
 	if err := c.Run(); err != nil {
-		log.Fatalf("Tunnel error: %v", err)
+		fmt.Printf("Tunnel error: %v\n", err)
+		return
 	}
 }
