@@ -5,12 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Boring Machine - Server Dashboard</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        @import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&family=Tourney:ital,wght@0,100..900&display=swap');
+
+        :root {
+            --bg-color: #f0f0f0;
+            --card-bg: #ffffff;
+            --text-main: #111111;
+            --text-muted: #666666;
+            --border-color: #333333;
+            --status-ok: #00cc66;
+            --status-err: #ff3333;
+            --font-mono: 'Geist Mono', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
+            font-family: var(--font-mono);
+            background-color: var(--bg-color);
+            color: var(--text-main);
             padding: 20px;
             min-height: 100vh;
         }
@@ -21,38 +38,48 @@
         }
 
         .header {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            gap: 20px;
         }
 
         .header h1 {
-            font-size: 2em;
-            color: #667eea;
-            margin-bottom: 10px;
+            font-family: 'Tourney', var(--font-mono);
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: -1px;
+            font-size: 2rem;
+            margin: 0;
+        }
+        
+        .header-meta {
+            text-align: right;
         }
 
         .status-badge {
             display: inline-block;
-            padding: 5px 15px;
-            background: #10b981;
-            color: white;
-            border-radius: 20px;
-            font-size: 0.9em;
+            margin-bottom: 10px;
+            padding: 5px 10px;
+            background: var(--status-ok);
+            color: var(--card-bg);
+            font-size: 0.8em;
             font-weight: 600;
+            text-transform: uppercase;
         }
 
         .header-info {
-            margin-top: 15px;
-            color: #6b7280;
-            font-size: 0.95em;
+            color: var(--text-muted);
+            font-size: 0.85em;
         }
 
         .header-info span {
             font-weight: 600;
-            color: #374151;
+            color: var(--text-main);
         }
 
         .grid {
@@ -63,32 +90,27 @@
         }
 
         .card {
-            background: white;
+            background: var(--card-bg);
+            border: 2px solid var(--border-color);
             padding: 25px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
         }
 
         .card h2 {
             font-size: 1.2em;
-            color: #667eea;
-            margin-bottom: 15px;
-            border-bottom: 2px solid #f3f4f6;
+            color: var(--text-main);
+            margin: 0 0 15px 0;
+            border-bottom: 1px solid #ddd;
             padding-bottom: 10px;
             display: flex;
             align-items: center;
+            text-transform: uppercase;
         }
 
         .card h2::before {
             content: attr(data-icon);
-            margin-right: 8px;
+            margin-right: 12px;
             font-size: 1.3em;
+            color: var(--text-muted);
         }
 
         .metric {
@@ -96,34 +118,36 @@
             justify-content: space-between;
             align-items: center;
             padding: 10px 0;
-            border-bottom: 1px solid #f3f4f6;
+            border-bottom: 1px solid #eee;
         }
 
-        .metric:last-child { border-bottom: none; }
+        .metric:last-child {
+            border-bottom: none;
+        }
 
         .metric-label {
-            color: #6b7280;
+            color: var(--text-muted);
             font-size: 0.95em;
         }
 
         .metric-value {
             font-weight: 600;
-            color: #111827;
+            color: var(--text-main);
             font-size: 1.1em;
         }
 
-        .clients-table {
+        .clients-table-container {
             width: 100%;
-            background: white;
+            background: var(--card-bg);
             padding: 25px;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border: 2px solid var(--border-color);
         }
 
-        .clients-table h2 {
-            margin-bottom: 20px;
-            color: #667eea;
+        .clients-table-container h2 {
+            margin: 0 0 20px 0;
+            color: var(--text-main);
             font-size: 1.3em;
+            text-transform: uppercase;
         }
 
         table {
@@ -134,49 +158,47 @@
         th {
             text-align: left;
             padding: 12px;
-            background: #f9fafb;
-            color: #667eea;
+            background: #f0f0f0;
+            color: var(--text-muted);
             font-weight: 600;
             font-size: 0.9em;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            border-bottom: 2px solid var(--border-color);
         }
 
         td {
             padding: 12px;
-            border-top: 1px solid #e5e7eb;
+            border-top: 1px solid #eee;
             font-size: 0.95em;
         }
 
         tr:hover {
-            background: #f9fafb;
+            background: #f9f9f9;
         }
 
         code {
-            background: #f3f4f6;
+            background: #e0e0e0;
             padding: 2px 6px;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
+            font-family: var(--font-mono);
             font-size: 0.9em;
-            color: #667eea;
+            color: var(--text-main);
         }
 
         .refresh-indicator {
             position: fixed;
-            top: 20px;
-            right: 20px;
-            background: white;
-            padding: 10px 20px;
-            border-radius: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            font-size: 0.9em;
-            color: #667eea;
-            font-weight: 600;
+            top: 10px;
+            right: 10px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 5px 10px;
+            font-size: 0.8em;
+            color: var(--text-muted);
         }
 
         @keyframes pulse {
             0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+            50% { opacity: 0.6; }
         }
 
         .updating {
@@ -185,7 +207,7 @@
 
         .no-data {
             text-align: center;
-            color: #9ca3af;
+            color: var(--text-muted);
             padding: 20px;
             font-style: italic;
         }
@@ -198,11 +220,13 @@
 
     <div class="container">
         <div class="header">
-            <h1>🚇 Boring Machine Dashboard</h1>
-            <span class="status-badge">● Server Running</span>
-            <div class="header-info">
-                <div>Started: <span id="startTime">-</span></div>
-                <div>Uptime: <span id="uptime">-</span></div>
+            <h1>🚇 Boring Machine</h1>
+            <div class="header-meta">
+                <div class="status-badge">● Server Running</div>
+                <div class="header-info">
+                    <div>Started: <span id="startTime">-</span></div>
+                    <div>Uptime: <span id="uptime">-</span></div>
+                </div>
             </div>
         </div>
 
@@ -256,7 +280,7 @@
             </div>
         </div>
 
-        <div class="clients-table">
+        <div class="clients-table-container">
             <h2>🔌 Active Tunnel Clients</h2>
             <table id="clientsTable">
                 <thead>
